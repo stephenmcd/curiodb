@@ -1,7 +1,7 @@
 
 package org.jupo.curiodb
 
-import akka.actor.{ActorSystem, Actor, ActorSelection, ActorRef, ActorLogging, Props, PoisonPill}
+import akka.actor.{ActorSystem, Actor, ActorSelection, ActorRef, ActorLogging, Props}
 import akka.io.{IO, Tcp}
 import akka.pattern.ask
 import akka.util.{ByteString, Timeout}
@@ -13,7 +13,7 @@ import scala.util.{Success, Failure, Random}
 import java.net.InetSocketAddress
 
 
-object Commands {
+object CommandType {
 
   val commands = Map(
     "StringNode" -> Set(
@@ -36,20 +36,12 @@ object Commands {
       "sinterstore", "sunionstore", "sscan"
     ),
     "KeyNode" -> Set(
-      "keys", "add", "scan", "exists", "expire", "randomkey", "del"
-    ),
-    "ClientNode" -> Set(
+      "keys", "add", "scan", "exists", "expire", "randomkey", "del",
       "mget", "mset", "msetnx"
     )
   )
 
-  val mustExistsCommands = Set("lpushx", "rpushx")
-  val cantExistsCommands = Set("setnx")
-
-  def nodeMustExist(command: String) = mustExistsCommands.contains(command)
-  def nodeCantExist(command: String) = cantExistsCommands.contains(command)
-
-  def nodeType(command: String): String = {
+  def apply(command: String): String = {
     val matched = commands.filter {_._2.contains(command)}
     if (matched.size == 1) matched.keys.head else ""
   }
@@ -57,32 +49,68 @@ object Commands {
 }
 
 
-abstract class Node extends Actor with ActorLogging {
+case class Payload(input: Seq[Any], client: Option[ActorRef] = None) {
+
+  val command = if (input.length > 0) input(0).toString else ""
+  val nodeType = CommandType(command)
+  val hasNode = nodeType != "KeyNode"
+  val key = if (!hasNode) "keys" else if (input.length > 1) input(1).toString else ""
+  val args = input.slice(if (hasNode) 2 else 1, input.length).map(_.toString)
+
+  def respond(response: Any) = {
+    client match {
+      case Some(client) =>
+        val message = response match {
+          case x: Iterable[Any] => x.mkString("\n")
+          case x => x.toString
+        }
+        client ! Tcp.Write(ByteString(s"$message\n"))
+      case None =>
+    }
+  }
+
+}
+
+
+case class Unrouted(payload: Payload)
+
+
+abstract class BaseActor extends Actor with ActorLogging {
+  def route(payload: Payload) = {
+    context.system.actorSelection("/user/keys") ! Unrouted(payload)
+  }
+}
+
+
+abstract class Node extends BaseActor {
 
   implicit var args = Seq[String]()
+  implicit var currentPayload = Payload("")
 
   type Command = PartialFunction[String, Any]
 
   def command: Command
 
   def receive = {
+    case "del" => context stop self
     case payload: Payload =>
       args = payload.args
+      currentPayload = payload
       val valid = payload.nodeType == getClass.getName.split('.').last
-      sender() ! (if (valid) command(payload.command) else {
-        s"Invalid command '${payload.command}' (${payload.nodeType} != ${getClass.getName})"
-      })
-  }
-
-  def select(key: String): ActorSelection = {
-    context.system.actorSelection(s"/user/$key")
-  }
-
-  def many[T](command: String, keys: Seq[String]): Seq[T] = {
-    val timeout_ = 2 seconds
-    implicit val timeout: Timeout = timeout_
-    val futures = Future.traverse(keys.toList)(key => select(key) ? Payload(command, key))
-    Await.result(futures, timeout_).asInstanceOf[Seq[T]]
+      val response = if (valid) command(payload.command) else {
+        s"Invalid command ${payload.command} for ${getClass.getName.split('.').last}"
+      }
+      val asking = sender().getClass.getName == "akka.pattern.PromiseActorRef"
+      log.info(s"${payload.command} ${payload.key} ${args.mkString(",")} -> ${response} ")
+      response match {
+        case () =>
+        case _  =>
+          payload.client match {
+            case Some(client) => payload.respond(response)
+            case _ if asking => sender() ! response
+            case _ =>
+          }
+      }
   }
 
   def scan(values: Iterable[String]): Seq[String] = {
@@ -105,7 +133,6 @@ abstract class Node extends Actor with ActorLogging {
   def argPairs = (0 to args.length - 2 by 2).map {i => (args(i), args(i + 1))}
 
 }
-
 
 class StringNode extends Node {
 
@@ -138,7 +165,6 @@ class StringNode extends Node {
 
 }
 
-
 class HashNode extends Node {
 
   var value = Map[String, String]()
@@ -164,7 +190,6 @@ class HashNode extends Node {
 
 }
 
-
 class ListNode extends Node {
 
   var value = ArrayBuffer[String]()
@@ -187,11 +212,7 @@ class ListNode extends Node {
     case "blpop"      => "Not implemented"
     case "brpop"      => "Not implemented"
     case "brpoplpush" => "Not implemented"
-    case "rpoplpush"  => {
-      val x = command("rpop")
-      select(args(0)) ! Payload("lpush" +: args :+ x.toString:_*)
-      x
-    }
+    case "rpoplpush"  => val x = command("rpop"); route(Payload("lpush" +: args :+ x.toString)); x
     case "linsert" => {
       val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
       if (i >= 0) {value.insert(i, args(2)); command("llen")} else -1
@@ -200,10 +221,18 @@ class ListNode extends Node {
 
 }
 
-
 class SetNode extends Node {
 
   var value = Set[String]()
+
+  def values(keys: Seq[String]): Seq[Set[String]] = {
+    val timeout_ = 2 seconds
+    implicit val timeout: Timeout = timeout_
+    val futures = Future.traverse(keys.toList) {key =>
+      context.system.actorSelection(s"/user/$key") ? Payload(Seq("smembers", key))
+    }
+    Await.result(futures, timeout_).asInstanceOf[Seq[Set[String]]]
+  }
 
   def command = {
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
@@ -213,138 +242,100 @@ class SetNode extends Node {
     case "smembers"    => value
     case "srandmember" => value.toSeq(Random.nextInt(value.size))
     case "spop"        => val x = command("srandmember"); value -= x.toString; x
-    case "sdiff"       => many[Set[String]]("smembers", args).fold(value)(_ &~ _)
-    case "sinter"      => many[Set[String]]("smembers", args).fold(value)(_ & _)
-    case "sunion"      => many[Set[String]]("smembers", args).fold(value)(_ | _)
-    case "sdiffstore"  => value = many[Set[String]]("smembers", args).reduce(_ &~ _); command("scard")
-    case "sinterstore" => value = many[Set[String]]("smembers", args).reduce(_ & _); command("scard")
-    case "sunionstore" => value = many[Set[String]]("smembers", args).reduce(_ | _); command("scard")
+    case "sdiff"       => values(args).fold(value)(_ &~ _)
+    case "sinter"      => values(args).fold(value)(_ & _)
+    case "sunion"      => values(args).fold(value)(_ | _)
+    case "sdiffstore"  => value = values(args).reduce(_ &~ _); command("scard")
+    case "sinterstore" => value = values(args).reduce(_ & _); command("scard")
+    case "sunionstore" => value = values(args).reduce(_ | _); command("scard")
     case "sscan"       => scan(value)
-    case "smove"       => {
-      if (value.contains(args(1))) {
-        value -= args(1)
-        select(args(0)) ! Payload("sadd" +: args:_*)
-        1
-      } else 0
-    }
+    case "smove"       => if (value.contains(args(1))) {value -= args(1); route(Payload("sadd" +: args)); 1} else 0
   }
 
+}
+
+
+class Collector(keys: Seq[String], payload: Payload) extends BaseActor {
+  self ! "collect"
+  def receive = {
+    case "collect" =>
+      val timeout_ = 2 seconds
+      implicit val timeout: Timeout = timeout_
+      val futures = Future.traverse(keys.toList) {key =>
+        context.system.actorSelection(s"/user/$key") ? Payload(Seq("get", key))
+      }
+      payload.respond(Await.result(futures, timeout_).asInstanceOf[Any])
+      context stop self
+  }
 }
 
 
 class KeyNode extends SetNode {
+
+  def select(key: String) = context.system.actorSelection(s"/user/$key")
+
   override def command = ({
-    case "add"       => value += args(0)
     case "keys"      => command("smembers")
     case "scan"      => command("sscan")
     case "exists"    => command("sismember")
     case "randomkey" => command("srandmember")
-    case "del"       => val x = args.filter(value.contains(_)).map(select(_) ! PoisonPill); value --= args; x.length
+    case "del"       => val x = args.filter(value.contains(_)).map(select(_) ! "del"); value --= args; x.length
+    case "mget"      => context.system.actorOf(Props(new Collector(args, currentPayload))); ()
+    case "mset"      => argPairs.foreach {args =>
+      route(Payload(Seq("set", args._1, args._2)))
+    }; "OK"
+    case "msetnx"    => if (argPairs.filter(args => !value.contains(args._1)).isEmpty) {command("mset"); 1} else 0
   }: Command) orElse super.command
+
+  override def receive = ({
+    case Unrouted(payload) =>
+      val exists = value.contains(payload.key) || !payload.hasNode
+      val cantExist = payload.command == "lpushx" || payload.command == "rpushx"
+      val mustExist = payload.command == "setnx"
+      if (exists && !cantExist) {
+        select(payload.key) ! payload
+      } else if (!exists && !mustExist) {
+        val props = payload.nodeType match {
+          case "StringNode" => Props[StringNode]
+          case "HashNode"   => Props[HashNode]
+          case "ListNode"   => Props[ListNode]
+          case "SetNode"    => Props[SetNode]
+        }
+        value += payload.key
+        context.system.actorOf(props, payload.key) ! payload
+      } else payload.respond(0)
+  }: Receive) orElse super.receive
+
 }
 
 
-case class Payload(input: Any*) {
-  val command = if (input.length > 0) input(0).toString else ""
-  val nodeType = Commands.nodeType(command)
-  val isClientCommand = nodeType == "ClientNode"
-  val isKeyCommand = nodeType == "KeyNode"
-  val key = if (input.length > 1 && !isClientCommand && !isKeyCommand) input(1).toString else if (isKeyCommand) "keys" else ""
-  val args = input.slice(if (isClientCommand || isKeyCommand) 1 else 2, input.length).map(_.toString)
-}
-
-
-class ClientNode extends Node with ActorLogging {
+class Connection extends BaseActor {
 
   val buffer = new StringBuilder()
-  val timeout_ = 10 seconds
-  implicit val timeout: Timeout = timeout_
-
-  def command = {
-    case "mget" => many[String]("get", args)
-    case "msetnx" =>
-      val future = select("keys") ? Payload("exists" +: argPairs.map(_._1):_*)
-      val result = Await.result(future, timeout_).asInstanceOf[Int]
-      if (result == 1) command("mset")
-      result
-    case "mset" =>
-      argPairs.foreach {args =>
-        val payload = Payload("set", args._1, args._2)
-        select(args._1).resolveOne(timeout_).onComplete {
-          case Success(node) => node ! payload
-          case Failure(_)    => create(Props[StringNode], args._1) ! payload
-        }
-      }
-      "OK"
-  }
-
-  def create(nodeType: Props, key: String): ActorRef = {
-    select("keys") ! Payload("add", key)
-    context.system.actorOf(nodeType, key)
-  }
-
-  def request(node: ActorRef, payload: Payload) = {
-    Await.result(node ? payload, timeout_).asInstanceOf[Any]
-  }
-
-  def respond(client: ActorRef, payload: Payload, response: Any) = {
-    val message = response match {
-      case x: Iterable[String] => x.mkString("\n")
-      case x => x.toString
-    }
-    log.info(s"Sending $message".replace("\n", " "))
-    client ! Tcp.Write(ByteString(s"$message\n"))
-  }
-
-  def handle(client: ActorRef, payload: Payload) = {
-    select(payload.key).resolveOne(timeout_).onComplete {
-      case Success(node) =>
-        val cantExist = Commands.nodeCantExist(payload.command)
-        respond(client, payload, if (!cantExist) request(node, payload) else 0)
-      case Failure(_) =>
-        val response = if (!Commands.nodeMustExist(payload.command)) {
-          val nodeType = payload.nodeType match {
-            case "StringNode" => Props[StringNode]
-            case "HashNode"   => Props[HashNode]
-            case "ListNode"   => Props[ListNode]
-            case "SetNode"    => Props[SetNode]
-          }
-          request(create(nodeType, payload.key), payload)
-        } else 0
-        respond(client, payload, response)
-    }
-  }
 
   override def receive = {
     case Tcp.PeerClosed => log.info("Disconnected"); context stop self
     case Tcp.Received(data) =>
       val received = data.utf8String
-      val shortened = received.trim.slice(0, 100).replace("\n", " ")
       buffer.append(received)
-      if (!received.endsWith("\n")) {
-        log.info(s"Received part $shortened")
-      } else {
-        log.info(s"Received all $shortened")
-        val client = sender()
-        val payload = new Payload(buffer.stripLineEnd.split(' '):_*)
+      if (received.endsWith("\n")) {
+        val data = buffer.stripLineEnd
+        val payload = new Payload(data.split(' '), Option(sender()))
+        log.info("Received " + data.slice(0, 100).replace("\n", " "))
         buffer.clear()
-        args = payload.args
         if (payload.nodeType == "") {
-          respond(client, payload, "Unknown command")
-        } else if (payload.isClientCommand) {
-          respond(client, payload, command(payload.command))
+          payload.respond("Unknown command")
         } else if (payload.key == "") {
-          respond(client, payload, "Too few paramaters")
+          payload.respond("Missing key")
         } else {
-          handle(client, payload)
+          route(payload)
         }
       }
   }
 
 }
 
-
-class Server(host: String, port: Int) extends Actor with ActorLogging {
+class Server(host: String, port: Int) extends BaseActor {
 
   import context.system
 
@@ -354,13 +345,12 @@ class Server(host: String, port: Int) extends Actor with ActorLogging {
     case Tcp.Bound(local) => log.info(s"Listening on $local")
     case Tcp.Connected(remote, local) =>
       log.info(s"Accepted connection from $remote")
-      sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
+      sender() ! Tcp.Register(context.actorOf(Props[Connection]))
   }
 
 }
 
-
-object Actis extends App {
+object CurioDB extends App {
   val system = ActorSystem()
   system.actorOf(Props[KeyNode], "keys")
   system.actorOf(Props(new Server("localhost", 9999)), "server")
