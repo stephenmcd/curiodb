@@ -39,7 +39,7 @@ object Commands {
 
   val specs = Map(
 
-    "StringNode" -> Map(
+    "string" -> Map(
       "append"       -> CommandSpec(args = 1),
       "bitcount"     -> CommandSpec(args = 0 to 2, default = zero),
       "bitop"        -> CommandSpec(args = 3 to many, default = zero),
@@ -62,7 +62,7 @@ object Commands {
       "strlen"       -> CommandSpec(default = zero)
     ),
 
-    "HashNode" -> Map(
+    "hash" -> Map(
       "hdel"         -> CommandSpec(args = 1 to many, default = zeros),
       "hexists"      -> CommandSpec(args = 1, default = zero),
       "hget"         -> CommandSpec(args = 1, default = nil),
@@ -79,7 +79,7 @@ object Commands {
       "hvals"        -> CommandSpec(default = seq)
     ),
 
-    "ListNode" -> Map(
+    "list" -> Map(
       "blpop"        -> CommandSpec(args = 1 to many, default = nil),
       "brpop"        -> CommandSpec(args = 1 to many, default = nil),
       "brpoplpush"   -> CommandSpec(args = 2, default = nil),
@@ -99,7 +99,7 @@ object Commands {
       "rpushx"       -> CommandSpec(args = 1, default = zero)
     ),
 
-    "SetNode" -> Map(
+    "set" -> Map(
       "sadd"         -> CommandSpec(args = 1 to many),
       "scard"        -> CommandSpec(default = zero),
       "sdiff"        -> CommandSpec(args = 0 to many, default = seq),
@@ -117,7 +117,7 @@ object Commands {
       "sunionstore"  -> CommandSpec(args = 1 to many, default = zero)
     ),
 
-    "KeyNode" -> Map(
+    "keys" -> Map(
       "del"          -> CommandSpec(args = 1 to many),
       "exists"       -> CommandSpec(args = 1),
       "expire"       -> CommandSpec(args = 2),
@@ -143,21 +143,19 @@ object Commands {
 
   def nodeSpecs(command: String) = specs.find(_._2.contains(command))
 
-  def nodeType(command: String) = {
+  def nodeType(command: String) =
     nodeSpecs(command) match {
       case Some((nodeType, _)) => nodeType
       case None => ""
     }
-  }
 
-  def default(command: String, args: Seq[String]) = {
+  def default(command: String, args: Seq[String]) =
     nodeSpecs(command) match {
       case Some((_, specs)) => specs(command).default(args)
       case None => ()
     }
-  }
 
-  def argsInRange(command: String, args: Seq[String]) = {
+  def argsInRange(command: String, args: Seq[String]) =
     nodeSpecs(command) match {
       case Some((_, specs)) =>
         specs(command).args match {
@@ -166,19 +164,16 @@ object Commands {
         }
       case None => false
     }
-  }
 
 }
 
-case class Payload(input: Seq[Any] = Seq(),
-                   toClient: Option[ActorRef] = None,
-                   toNode: Option[ActorRef] = None) {
+case class Payload(input: Seq[Any] = Seq(), toClient: Option[ActorRef] = None, toNode: Option[ActorRef] = None) {
 
   val command = if (input.length > 0) input(0).toString else ""
   val nodeType = Commands.nodeType(command)
-  val hasNode = nodeType != "KeyNode"
-  val key = if (!hasNode) "keys" else if (input.length > 1) input(1).toString else ""
-  val args = input.slice(if (hasNode) 2 else 1, input.length).map(_.toString)
+  val forKeyNode = nodeType == "keys"
+  val key = if (forKeyNode) "keys" else if (input.length > 1) input(1).toString else ""
+  val args = input.slice(if (forKeyNode) 1 else 2, input.length).map(_.toString)
 
   def deliver(response: Any) = {
     response match {
@@ -211,9 +206,8 @@ case class Unrouted(payload: Payload)
 case class Response(value: Any, key: String)
 
 abstract class BaseActor extends Actor with ActorLogging {
-  def route(payload: Payload) = {
+  def route(payload: Payload) =
     context.system.actorSelection("/user/keys") ! Unrouted(payload)
-  }
 }
 
 abstract class Node extends BaseActor {
@@ -222,18 +216,15 @@ abstract class Node extends BaseActor {
   type Run = PartialFunction[String, Any]
   def run: Run
   def args = payload.args
-  def nodeType = getClass.getName.split('.').last
 
   def receive = {
     case "del" => log.debug("Deleted"); context stop self
     case p: Payload =>
       payload = p
       val running = s"${p.command} ${p.key} ${args.mkString(" ").trim}"
-      val error = s"Invalid command ${p.command} for ${nodeType}"
-      val response = if (p.nodeType == nodeType) { // TODO: This should be in KeyNode once it knows types.
-        try run(p.command)
-        catch {case e: Throwable => log.error(s"$e ($running)"); "error"}
-      } else error
+      val response = try {
+        run(p.command)
+      } catch {case e: Throwable => log.error(s"$e ($running)"); "error"}
       log.debug(s"Running ${running} -> ${response}".replace("\n", " "))
       payload.deliver(response)
   }
@@ -292,28 +283,37 @@ class StringNode extends Node {
 
 }
 
-class HashNode extends Node {
+class BaseHashNode[T] extends Node {
 
-  var value = MutableMap[String, String]()
+  var value = MutableMap[String, T]()
+
+  def exists = value.contains(args(0))
+
+  def run = {
+    case "hkeys"   => value.keys
+    case "hexists" => exists
+    case "hscan"   => scan(value.keys)
+  }
+
+}
+
+class HashNode extends BaseHashNode[String] {
 
   def set(arg: Any) = {val x = arg.toString; value(args(0)) = x; x}
 
-  def run = {
+  override def run = ({
     case "hget"         => value.get(args(0))
-    case "hsetnx"       => if (run("exists") == true) run("hset") else false
+    case "hsetnx"       => if (exists) run("hset") else false
     case "hgetall"      => value.map(x => Seq(x._1, x._2)).flatten
-    case "hkeys"        => value.keys
     case "hvals"        => value.values
     case "hdel"         => val x = run("hexists"); value -= args(0); x
-    case "hexists"      => value.contains(args(0))
     case "hlen"         => value.size
     case "hmget"        => args.map(value.get(_))
     case "hmset"        => argPairs.foreach {args => value(args._1) = args._2}; "OK"
     case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt)
     case "hincrbyfloat" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
-    case "hscan"        => scan(value.keys)
-    case "hset"         => val x = run("hexists") != true; set(args(1)); x
-  }
+    case "hset"         => val x = !exists; set(args(1)); x
+  }: Run) orElse super.run
 
 }
 
@@ -401,31 +401,33 @@ class Collector(keys: Seq[String], payload: Payload) extends BaseActor {
 
 }
 
-class KeyNode extends SetNode {
+class NodeEntry(val node: ActorRef, val nodeType: String, var expiry: Option[(Long, Cancellable)] = None)
 
-  val expiring = MutableMap[String, (Long, Cancellable)]()
+class KeyNode extends BaseHashNode[NodeEntry] {
 
   def expire(when: Long): Boolean = {
-    val x = run("exists") == true
-    val expires = ((when - System.currentTimeMillis).toInt milliseconds)
-    if (x) expiring(args(0)) = (when, context.system.scheduler.scheduleOnce(expires) {
-      self ! Payload(Seq("del", args(0)))
-    }); x
+    val x = run("persist") != -2
+    if (x) {
+      val expires = ((when - System.currentTimeMillis).toInt milliseconds)
+      value(args(0)).expiry = Option((when, context.system.scheduler.scheduleOnce(expires) {
+        self ! Payload(Seq("del", args(0)))
+      }))
+    }; x
   }
 
   def ttl = {
     if (run("exists") == false) -2
-    else if (!expiring.contains(args(0))) -1
-    else expiring(args(0))._1 - System.currentTimeMillis
+    else value(args(0)).expiry match {
+      case None => -1
+      case Some((when, _)) => when - System.currentTimeMillis
+    }
   }
 
-  def select(key: String) = context.system.actorSelection(s"/user/$key")
-
   override def run = ({
-    case "keys"      => run("smembers")
-    case "scan"      => run("sscan")
-    case "exists"    => run("sismember")
-    case "randomkey" => run("srandmember")
+    case "keys"      => run("hkeys")
+    case "scan"      => run("hscan")
+    case "exists"    => run("hexists")
+    case "randomkey" => value.keys.toSeq(Random.nextInt(value.size))
     case "mget"      => context.system.actorOf(Props(new Collector(args, payload))); ()
     case "mset"      => argPairs.foreach {args => route(Payload(Seq("set", args._1, args._2)))}; "OK"
     case "msetnx"    => val x = argPairs.filter(args => !value.contains(args._1)).isEmpty; if (x) {run("mset")}; x
@@ -436,38 +438,44 @@ class KeyNode extends SetNode {
     case "expireat"  => expire(args(1).toLong / 1000)
     case "pexpireat" => expire(args(1).toLong)
     case "sort"      => "Not implemented"
-    case "type"      => "Not implemented"
+    case "type"      => if (exists) value(args(0)).nodeType else "nil"
     case "rename"    => "Not implemented"
     case "renamenx"  => val x = value.contains(args(1)); if (x) {run("rename")}; x
+    case "del"       => val x = args.filter(value.contains(_)).map(value(_).node ! "del"); value --= args; x.length
     case "persist"   =>
-      val isExpiring = expiring.contains(args(0)) && !expiring(args(0))._2.isCancelled
-      val x = run("exists") == true && isExpiring
-      if (x) {expiring(args(0))._2.cancel()}; x
-    case "del"       =>
-      val x = args.filter(value.contains(_)).map(select(_) ! "del")
-      value --= args; expiring --= args;
-      x.length
+      val x = exists
+      if (x) {
+        value(args(0)).expiry match {
+          case None =>
+          case Some((_, cancellable)) => cancellable.cancel()
+        }
+      }; x
   }: Run) orElse super.run
 
   override def receive = ({
     case Unrouted(payload) =>
-      val exists = value.contains(payload.key) || !payload.hasNode
+      val exists = value.contains(payload.key)
       val cantExist = payload.command == "lpushx" || payload.command == "rpushx"
       val mustExist = payload.command == "setnx"
       val default = Commands.default(payload.command, payload.args)
-      if (exists && !cantExist) {
-        select(payload.key) ! payload
+      val invalid = exists && value(payload.key).nodeType != payload.nodeType
+      if (payload.forKeyNode) {
+        self ! payload
+      } else if (invalid) {
+        payload.deliver(s"Invalid command ${payload.command} for ${value(payload.key).nodeType}")
+      } else if (exists && !cantExist) {
+        value(payload.key).node ! payload
       } else if (!exists && default != ()) {
         payload.deliver(default)
       } else if (!exists && !mustExist) {
-        val props = payload.nodeType match {
-          case "StringNode" => Props[StringNode]
-          case "HashNode"   => Props[HashNode]
-          case "ListNode"   => Props[ListNode]
-          case "SetNode"    => Props[SetNode]
-        }
-        value += payload.key
-        context.system.actorOf(props, payload.key) ! payload
+        val node = context.system.actorOf(payload.nodeType match {
+          case "string" => Props[StringNode]
+          case "hash"   => Props[HashNode]
+          case "list"   => Props[ListNode]
+          case "set"    => Props[SetNode]
+        })
+        value(payload.key) = new NodeEntry(node, payload.nodeType)
+        node ! payload
       } else payload.deliver(0)
   }: Receive) orElse super.receive
 
