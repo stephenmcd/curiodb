@@ -5,7 +5,7 @@ import akka.actor.{ActorSystem, Actor, ActorSelection, ActorRef, ActorLogging, C
 import akka.io.{IO, Tcp}
 import akka.pattern.ask
 import akka.util.{ByteString, Timeout}
-import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set}
+import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHashSet}
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -159,8 +159,8 @@ object Commands {
     nodeSpecs(command) match {
       case Some((_, specs)) =>
         specs(command).args match {
-          case fixed: Int => args.length == fixed
-          case range: Range => range.contains(args.length)
+          case fixed: Int => args.size == fixed
+          case range: Range => range.contains(args.size)
         }
       case None => false
     }
@@ -169,11 +169,11 @@ object Commands {
 
 case class Payload(input: Seq[Any] = Seq(), toClient: Option[ActorRef] = None, toNode: Option[ActorRef] = None) {
 
-  val command = if (input.length > 0) input(0).toString else ""
+  val command = if (input.size > 0) input(0).toString else ""
   val nodeType = Commands.nodeType(command)
   val forKeyNode = nodeType == "keys"
-  val key = if (forKeyNode) "keys" else if (input.length > 1) input(1).toString else ""
-  val args = input.slice(if (forKeyNode) 1 else 2, input.length).map(_.toString)
+  val key = if (forKeyNode) "keys" else if (input.size > 1) input(1).toString else ""
+  val args = input.slice(if (forKeyNode) 1 else 2, input.size).map(_.toString)
 
   def deliver(response: Any) = {
     response match {
@@ -230,10 +230,10 @@ abstract class Node extends BaseActor {
   }
 
   def scan(values: Iterable[String]) = {
-    val count = if (args.length >= 3) args(2).toInt else 10
-    val start = if (args.length >= 1) args(0).toInt else 0
+    val count = if (args.size >= 3) args(2).toInt else 10
+    val start = if (args.size >= 1) args(0).toInt else 0
     val end = start + count
-    val filtered = if (args.length >= 2) {
+    val filtered = if (args.size >= 2) {
       val regex = ("^" + args(1).map {
         case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
         case '*' => ".*"
@@ -246,7 +246,7 @@ abstract class Node extends BaseActor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
-  def argPairs = (0 to args.length - 2 by 2).map {i => (args(i), args(i + 1))}
+  def argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
 }
 
@@ -266,7 +266,7 @@ class StringNode extends Node {
     case "append"      => value += args(0); value
     case "getrange"    => value.slice(args(0).toInt, args(1).toInt)
     case "setrange"    => value.patch(args(0).toInt, args(1), 1)
-    case "strlen"      => value.length
+    case "strlen"      => value.size
     case "incr"        => value = (valueOrZero.toInt + 1).toString; value
     case "incrby"      => value = (valueOrZero.toInt + args(0).toInt).toString; value
     case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
@@ -320,29 +320,48 @@ class HashNode extends BaseHashNode[String] {
 class ListNode extends Node {
 
   var value = ArrayBuffer[String]()
+  var blocked = LinkedHashSet[Payload]()
 
   def slice = value.slice(args(0).toInt, args(1).toInt)
 
+  def block: Any = {
+    if (value.size == 0) {
+      blocked += payload
+      context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
+        blocked -= payload
+        payload.deliver("nil")
+      }; ()
+    } else run(payload.command.tail)
+  }
+
+  def unblock = {
+    while (value.size > 0 && blocked.size > 0) {
+      payload = blocked.head
+      blocked -= payload
+      payload.deliver(run(payload.command.tail))
+    }
+  }
+
   def run = {
-    case "lpush"      => args ++=: value; run("llen")
-    case "rpush"      => value ++= args; run("llen")
+    case "lpush"      => args ++=: value; payload.deliver(run("llen")); unblock
+    case "rpush"      => value ++= args; payload.deliver(run("llen")); unblock
     case "lpushx"     => run("lpush")
     case "rpushx"     => run("rpush")
     case "lpop"       => val x = value(0); value -= x; x
-    case "rpop"       => val x = value.last; value.reduceToSize(value.length - 1); x
-    case "lset"       => value(args(0).toInt) = args(1); "OK"
+    case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
+    case "lset"       => value(args(0).toInt) = args(1); payload.deliver("OK"); unblock
     case "lindex"     => value(args(0).toInt)
     case "lrem"       => value.remove(args(0).toInt)
     case "lrange"     => slice
     case "ltrim"      => value = slice; "OK"
-    case "llen"       => value.length
-    case "blpop"      => "Not implemented"
-    case "brpop"      => "Not implemented"
-    case "brpoplpush" => "Not implemented"
+    case "llen"       => value.size
+    case "blpop"      => block
+    case "brpop"      => block
+    case "brpoplpush" => block
     case "rpoplpush"  => val x = run("rpop"); route(Payload("lpush" +: args :+ x.toString)); x
     case "linsert"    =>
       val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
-      if (i >= 0) {value.insert(i, args(2)); run("llen")} else -1
+      if (i >= 0) {value.insert(i, args(2)); payload.deliver(run("llen")); unblock} else -1
   }
 
 }
@@ -393,7 +412,7 @@ class Collector(keys: Seq[String], payload: Payload) extends BaseActor {
   def receive = {
     case response: Response =>
       responses(response.key) = response.value
-      if (responses.size == keys.length) {
+      if (responses.size == keys.size) {
         payload.deliver(keys.map {key: String => responses(key)})
         context stop self
       }
@@ -439,9 +458,15 @@ class KeyNode extends BaseHashNode[NodeEntry] {
     case "pexpireat" => expire(args(1).toLong)
     case "sort"      => "Not implemented"
     case "type"      => if (exists) value(args(0)).nodeType else "nil"
-    case "rename"    => "Not implemented"
+    case "rename"    =>
+      if (args(0) != args(1)) {
+        if (value.contains(args(1))) value(args(1)).node ! "del"
+        value(args(1)) = value(args(0))
+        value -= args(0)
+        "OK"
+      } else "error"
     case "renamenx"  => val x = value.contains(args(1)); if (x) {run("rename")}; x
-    case "del"       => val x = args.filter(value.contains(_)).map(value(_).node ! "del"); value --= args; x.length
+    case "del"       => val x = args.filter(value.contains(_)).map(value(_).node ! "del"); value --= args; x.size
     case "persist"   =>
       val x = exists
       if (x) {
