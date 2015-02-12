@@ -4,6 +4,8 @@ package curiodb
 import akka.actor.{ActorSystem, Actor, ActorSelection, ActorRef, ActorLogging, Cancellable, Props}
 import akka.io.{IO, Tcp}
 import akka.pattern.ask
+import akka.routing.{Broadcast, ConsistentHashingPool}
+import akka.routing.ConsistentHashingRouter.ConsistentHashable
 import akka.util.{ByteString, Timeout}
 import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHashSet}
 import scala.concurrent.{Await, Future}
@@ -13,130 +15,139 @@ import scala.util.Random
 import java.net.InetSocketAddress
 
 
-class CommandSpec(val args: Any, val default: (Seq[String] => Any))
-
-object CommandSpec {
-  def apply(args: Any = 0, default: (Seq[String] => Any) = (_ => ())) = {
-    new CommandSpec(args, default)
-  }
-}
-
 object Commands {
 
-  val many = Int.MaxValue
-  val evens = 2 to many by 2
+  class Spec(val args: Any, val default: (Seq[String] => Any))
 
-  val error    = (_: Seq[String]) => "error"
-  val nil      = (_: Seq[String]) => "nil"
-  val ok       = (_: Seq[String]) => "OK"
-  val zero     = (_: Seq[String]) => 0
-  val negative = (_: Seq[String]) => -1
-  val nils     = (x: Seq[String]) => x.map(_ => nil)
-  val zeros    = (x: Seq[String]) => x.map(_ => zero)
-  val seq      = (_: Seq[String]) => Seq()
-  val string   = (_: Seq[String]) => ""
-  val scan     = (_: Seq[String]) => Seq("0", "")
+  object Spec {
+    def apply(args: Any = 0, default: (Seq[String] => Any) = (_ => ())) = {
+      new Spec(args, default)
+    }
+  }
 
-  val specs = Map(
+  private val many = Int.MaxValue
+  private val evens = 2 to many by 2
+
+  private val error    = (_: Seq[String]) => "error"
+  private val nil      = (_: Seq[String]) => "nil"
+  private val ok       = (_: Seq[String]) => "OK"
+  private val zero     = (_: Seq[String]) => 0
+  private val negative = (_: Seq[String]) => -1
+  private val nils     = (x: Seq[String]) => x.map(_ => nil)
+  private val zeros    = (x: Seq[String]) => x.map(_ => zero)
+  private val seq      = (_: Seq[String]) => Seq()
+  private val string   = (_: Seq[String]) => ""
+  private val scan     = (_: Seq[String]) => Seq("0", "")
+
+  private val specs = Map(
 
     "string" -> Map(
-      "append"       -> CommandSpec(args = 1),
-      "bitcount"     -> CommandSpec(args = 0 to 2, default = zero),
-      "bitop"        -> CommandSpec(args = 3 to many, default = zero),
-      "bitpos"       -> CommandSpec(args = 1 to 3, default = negative),
-      "decr"         -> CommandSpec(),
-      "decrby"       -> CommandSpec(args = 1),
-      "get"          -> CommandSpec(default = nil),
-      "getbit"       -> CommandSpec(args = 1, zero),
-      "getrange"     -> CommandSpec(args = 2, default = string),
-      "getset"       -> CommandSpec(args = 1),
-      "incr"         -> CommandSpec(),
-      "incrby"       -> CommandSpec(args = 1),
-      "incrbyfloat"  -> CommandSpec(args = 1),
-      "psetex"       -> CommandSpec(args = 2),
-      "set"          -> CommandSpec(args = 1 to 4),
-      "setbit"       -> CommandSpec(args = 2),
-      "setex"        -> CommandSpec(args = 2),
-      "setnx"        -> CommandSpec(args = 1, default = zero),
-      "setrange"     -> CommandSpec(args = 2),
-      "strlen"       -> CommandSpec(default = zero)
+      "_renamed"     -> Spec(args = 1, default = nil),
+      "append"       -> Spec(args = 1),
+      "bitcount"     -> Spec(args = 0 to 2, default = zero),
+      "bitop"        -> Spec(args = 3 to many, default = zero),
+      "bitpos"       -> Spec(args = 1 to 3, default = negative),
+      "decr"         -> Spec(),
+      "decrby"       -> Spec(args = 1),
+      "get"          -> Spec(default = nil),
+      "getbit"       -> Spec(args = 1, zero),
+      "getrange"     -> Spec(args = 2, default = string),
+      "getset"       -> Spec(args = 1),
+      "incr"         -> Spec(),
+      "incrby"       -> Spec(args = 1),
+      "incrbyfloat"  -> Spec(args = 1),
+      "psetex"       -> Spec(args = 2),
+      "set"          -> Spec(args = 1 to 4),
+      "setbit"       -> Spec(args = 2),
+      "setex"        -> Spec(args = 2),
+      "setnx"        -> Spec(args = 1, default = zero),
+      "setrange"     -> Spec(args = 2),
+      "strlen"       -> Spec(default = zero)
     ),
 
     "hash" -> Map(
-      "hdel"         -> CommandSpec(args = 1 to many, default = zeros),
-      "hexists"      -> CommandSpec(args = 1, default = zero),
-      "hget"         -> CommandSpec(args = 1, default = nil),
-      "hgetall"      -> CommandSpec(default = seq),
-      "hincrby"      -> CommandSpec(args = 2),
-      "hincrbyfloat" -> CommandSpec(args = 2),
-      "hkeys"        -> CommandSpec(default = seq),
-      "hlen"         -> CommandSpec(default = zero),
-      "hmget"        -> CommandSpec(args = 1 to many, default = nils),
-      "hmset"        -> CommandSpec(args = evens),
-      "hscan"        -> CommandSpec(args = 1 to 3, default = scan),
-      "hset"         -> CommandSpec(args = 2),
-      "hsetnx"       -> CommandSpec(args = 2),
-      "hvals"        -> CommandSpec(default = seq)
+      "_hrenamed"    -> Spec(args = 1, default = nil),
+      "hdel"         -> Spec(args = 1 to many, default = zeros),
+      "hexists"      -> Spec(args = 1, default = zero),
+      "hget"         -> Spec(args = 1, default = nil),
+      "hgetall"      -> Spec(default = seq),
+      "hincrby"      -> Spec(args = 2),
+      "hincrbyfloat" -> Spec(args = 2),
+      "hkeys"        -> Spec(default = seq),
+      "hlen"         -> Spec(default = zero),
+      "hmget"        -> Spec(args = 1 to many, default = nils),
+      "hmset"        -> Spec(args = evens),
+      "hscan"        -> Spec(args = 1 to 3, default = scan),
+      "hset"         -> Spec(args = 2),
+      "hsetnx"       -> Spec(args = 2),
+      "hvals"        -> Spec(default = seq)
     ),
 
     "list" -> Map(
-      "blpop"        -> CommandSpec(args = 1 to many, default = nil),
-      "brpop"        -> CommandSpec(args = 1 to many, default = nil),
-      "brpoplpush"   -> CommandSpec(args = 2, default = nil),
-      "lindex"       -> CommandSpec(args = 1, default = nil),
-      "linsert"      -> CommandSpec(args = 3, default = zero),
-      "llen"         -> CommandSpec(default = zero),
-      "lpop"         -> CommandSpec(default = nil),
-      "lpush"        -> CommandSpec(args = 1 to many),
-      "lpushx"       -> CommandSpec(args = 1, default = zero),
-      "lrange"       -> CommandSpec(args = 2, default = seq),
-      "lrem"         -> CommandSpec(args = 2, default = zero),
-      "lset"         -> CommandSpec(args = 2, default = error),
-      "ltrim"        -> CommandSpec(args = 2, default = ok),
-      "rpop"         -> CommandSpec(default = nil),
-      "rpoplpush"    -> CommandSpec(args = 1, default = nil),
-      "rpush"        -> CommandSpec(args = 1 to many),
-      "rpushx"       -> CommandSpec(args = 1, default = zero)
+      "_lrenamed"    -> Spec(args = 1, default = nil),
+      "blpop"        -> Spec(args = 1 to many, default = nil),
+      "brpop"        -> Spec(args = 1 to many, default = nil),
+      "brpoplpush"   -> Spec(args = 2, default = nil),
+      "lindex"       -> Spec(args = 1, default = nil),
+      "linsert"      -> Spec(args = 3, default = zero),
+      "llen"         -> Spec(default = zero),
+      "lpop"         -> Spec(default = nil),
+      "lpush"        -> Spec(args = 1 to many),
+      "lpushx"       -> Spec(args = 1, default = zero),
+      "lrange"       -> Spec(args = 2, default = seq),
+      "lrem"         -> Spec(args = 2, default = zero),
+      "lset"         -> Spec(args = 2, default = error),
+      "ltrim"        -> Spec(args = 2, default = ok),
+      "rpop"         -> Spec(default = nil),
+      "rpoplpush"    -> Spec(args = 1, default = nil),
+      "rpush"        -> Spec(args = 1 to many),
+      "rpushx"       -> Spec(args = 1, default = zero)
     ),
 
     "set" -> Map(
-      "sadd"         -> CommandSpec(args = 1 to many),
-      "scard"        -> CommandSpec(default = zero),
-      "sdiff"        -> CommandSpec(args = 0 to many, default = seq),
-      "sdiffstore"   -> CommandSpec(args = 1 to many, default = zero),
-      "sinter"       -> CommandSpec(args = 0 to many, default = seq),
-      "sinterstore"  -> CommandSpec(args = 1 to many, default = zero),
-      "sismember"    -> CommandSpec(args = 1, default = zero),
-      "smembers"     -> CommandSpec(args = 1 to many, default = seq),
-      "smove"        -> CommandSpec(args = 2, default = error),
-      "spop"         -> CommandSpec(default = nil),
-      "srandmember"  -> CommandSpec(args = 0 to 1, default = nil),
-      "srem"         -> CommandSpec(args = 1 to many, default = zero),
-      "sscan"        -> CommandSpec(args = 1 to 3, default = scan),
-      "sunion"       -> CommandSpec(args = 0 to many, default = seq),
-      "sunionstore"  -> CommandSpec(args = 1 to many, default = zero)
+      "_srenamed"    -> Spec(args = 1, default = nil),
+      "sadd"         -> Spec(args = 1 to many),
+      "scard"        -> Spec(default = zero),
+      "sdiff"        -> Spec(args = 0 to many, default = seq),
+      "sdiffstore"   -> Spec(args = 1 to many, default = zero),
+      "sinter"       -> Spec(args = 0 to many, default = seq),
+      "sinterstore"  -> Spec(args = 1 to many, default = zero),
+      "sismember"    -> Spec(args = 1, default = zero),
+      "smembers"     -> Spec(default = seq),
+      "smove"        -> Spec(args = 2, default = error),
+      "spop"         -> Spec(default = nil),
+      "srandmember"  -> Spec(args = 0 to 1, default = nil),
+      "srem"         -> Spec(args = 1 to many, default = zero),
+      "sscan"        -> Spec(args = 1 to 3, default = scan),
+      "sunion"       -> Spec(args = 0 to many, default = seq),
+      "sunionstore"  -> Spec(args = 1 to many, default = zero)
     ),
 
     "keys" -> Map(
-      "del"          -> CommandSpec(args = 1 to many),
-      "exists"       -> CommandSpec(args = 1),
-      "expire"       -> CommandSpec(args = 2),
-      "expireat"     -> CommandSpec(args = 2),
-      "keys"         -> CommandSpec(args = 1),
-      "mget"         -> CommandSpec(args = 1 to many),
-      "mset"         -> CommandSpec(args = evens),
-      "msetnx"       -> CommandSpec(args = evens),
-      "persist"      -> CommandSpec(args = 1),
-      "pexpire"      -> CommandSpec(args = 2),
-      "pexpireat"    -> CommandSpec(args = 2),
-      "pttl"         -> CommandSpec(args = 1),
-      "randomkey"    -> CommandSpec(),
-      "rename"       -> CommandSpec(args = 2, default = error),
-      "renamenx"     -> CommandSpec(args = 2, default = error),
-      "scan"         -> CommandSpec(args = 1 to 3),
-      "sort"         -> CommandSpec(args = 1 to many, default = seq),
-      "ttl"          -> CommandSpec(args = 1),
-      "type"         -> CommandSpec(args = 1)
+      "_del"         -> Spec(args = 1, default = nil),
+      "_keys"        -> Spec(),
+      "exists"       -> Spec(),
+      "expire"       -> Spec(args = 2),
+      "expireat"     -> Spec(args = 2),
+      "persist"      -> Spec(args = 1),
+      "pexpire"      -> Spec(args = 2),
+      "pexpireat"    -> Spec(args = 2),
+      "pttl"         -> Spec(args = 1),
+      "rename"       -> Spec(args = 1, default = error),
+      "renamenx"     -> Spec(args = 1, default = error),
+      "sort"         -> Spec(args = 1 to many, default = seq),
+      "ttl"          -> Spec(args = 1),
+      "type"         -> Spec(args = 1)
+    ),
+
+    "client" -> Map(
+      "del"          -> Spec(args = 1 to many),
+      "keys"         -> Spec(args = 1),
+      "scan"         -> Spec(args = 1 to 3),
+      "randomkey"    -> Spec(),
+      "mget"         -> Spec(args = 1 to many),
+      "mset"         -> Spec(args = evens),
+      "msetnx"       -> Spec(args = evens)
     )
 
   )
@@ -169,11 +180,15 @@ object Commands {
 
 case class Payload(input: Seq[Any] = Seq(), toClient: Option[ActorRef] = None, toNode: Option[ActorRef] = None) {
 
-  val command = if (input.size > 0) input(0).toString else ""
+  // TODO: read redis protocol
+  val command = if (input.size > 0) input(0).toString.toLowerCase else ""
   val nodeType = Commands.nodeType(command)
   val forKeyNode = nodeType == "keys"
-  val key = if (forKeyNode) "keys" else if (input.size > 1) input(1).toString else ""
-  val args = input.slice(if (forKeyNode) 1 else 2, input.size).map(_.toString)
+  val forClientNode = nodeType == "client"
+  val key = if (input.size > 1 && !forClientNode) input(1).toString else ""
+  val args = input.slice(if (forClientNode) 1 else 2, input.size).map(_.toString)
+
+  def argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
   def deliver(response: Any) = {
     response match {
@@ -183,6 +198,7 @@ case class Payload(input: Seq[Any] = Seq(), toClient: Option[ActorRef] = None, t
         toClient match {
           case None =>
           case Some(destination) =>
+            // TODO: write redis protocol
             val message = response match {
               case x: Iterable[Any] => x.mkString("\n")
               case x: Boolean => if (x) "1" else "0"
@@ -201,13 +217,16 @@ case class Payload(input: Seq[Any] = Seq(), toClient: Option[ActorRef] = None, t
 
 }
 
-case class Unrouted(payload: Payload)
+case class Unrouted(payload: Payload) extends ConsistentHashable {
+  override def consistentHashKey: Any = payload.key
+}
 
 case class Response(value: Any, key: String)
 
 abstract class BaseActor extends Actor with ActorLogging {
-  def route(payload: Payload) =
+  def route(payload: Payload) = {
     context.system.actorSelection("/user/keys") ! Unrouted(payload)
+  }
 }
 
 abstract class Node extends BaseActor {
@@ -218,15 +237,25 @@ abstract class Node extends BaseActor {
   def args = payload.args
 
   def receive = {
-    case "del" => log.debug("Deleted"); context stop self
+    case "del" => log.info("Deleted"); context stop self
     case p: Payload =>
       payload = p
       val running = s"${p.command} ${p.key} ${args.mkString(" ").trim}"
       val response = try {
         run(p.command)
       } catch {case e: Throwable => log.error(s"$e ($running)"); "error"}
-      log.debug(s"Running ${running} -> ${response}".replace("\n", " "))
+      log.info(s"Running ${running} -> ${response}".replace("\n", " "))
       payload.deliver(response)
+  }
+
+  def aggregate: Unit = {
+    context.actorOf(Props(payload.command match {
+      case "del"       => classOf[AggregateDel]
+      case "mget"      => classOf[AggregateMget]
+      case "msetnx"    => classOf[AggregateMsetnx]
+      case "keys"      => classOf[AggregateKeys]
+      case "randomkey" => classOf[AggregateRandomKey]
+    }, payload))
   }
 
   def scan(values: Iterable[String]) = {
@@ -246,7 +275,13 @@ abstract class Node extends BaseActor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
-  def argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
+  def renamed(to: String, value: Any) = {
+    route(Payload(Seq("_del", payload.key)))
+    route(Payload(Seq(to, args(0)) ++ (value match {
+      case x: Iterable[Any] => x
+      case x => Seq(x)
+    })))
+  }
 
 }
 
@@ -259,6 +294,7 @@ class StringNode extends Node {
   def expire(command: String) = route(Payload(Seq(command, payload.key, args(1))))
 
   def run = {
+    case "_renamed"    => renamed("set", value)
     case "get"         => value
     case "set"         => value = args(0); "OK"
     case "setnx"       => run("set"); true
@@ -287,11 +323,11 @@ class BaseHashNode[T] extends Node {
 
   var value = MutableMap[String, T]()
 
-  def exists = value.contains(args(0))
+  def exists = value.contains _
 
   def run = {
     case "hkeys"   => value.keys
-    case "hexists" => exists
+    case "hexists" => exists(args(0))
     case "hscan"   => scan(value.keys)
   }
 
@@ -301,18 +337,21 @@ class HashNode extends BaseHashNode[String] {
 
   def set(arg: Any) = {val x = arg.toString; value(args(0)) = x; x}
 
+  def flatten = value.map(x => Seq(x._1, x._2)).flatten
+
   override def run = ({
+    case "_hrenamed"    => renamed("hmset", flatten)
     case "hget"         => value.get(args(0))
-    case "hsetnx"       => if (exists) run("hset") else false
-    case "hgetall"      => value.map(x => Seq(x._1, x._2)).flatten
+    case "hsetnx"       => if (exists(args(0))) run("hset") else false
+    case "hgetall"      => flatten
     case "hvals"        => value.values
     case "hdel"         => val x = run("hexists"); value -= args(0); x
     case "hlen"         => value.size
     case "hmget"        => args.map(value.get(_))
-    case "hmset"        => argPairs.foreach {args => value(args._1) = args._2}; "OK"
+    case "hmset"        => payload.argPairs.foreach {args => value(args._1) = args._2}; "OK"
     case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt)
     case "hincrbyfloat" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
-    case "hset"         => val x = !exists; set(args(1)); x
+    case "hset"         => val x = !exists(args(0)); set(args(1)); x
   }: Run) orElse super.run
 
 }
@@ -322,7 +361,10 @@ class ListNode extends Node {
   var value = ArrayBuffer[String]()
   var blocked = LinkedHashSet[Payload]()
 
-  def slice = value.slice(args(0).toInt, args(1).toInt)
+  def slice = {
+    val to = args(1).toInt
+    value.slice(args(0).toInt, if (to < 0) value.size + 1 + to else to + 1)
+  }
 
   def block: Any = {
     if (value.size == 0) {
@@ -343,6 +385,7 @@ class ListNode extends Node {
   }
 
   def run = {
+    case "_lrenamed"  => renamed("lpush", value)
     case "lpush"      => args ++=: value; payload.deliver(run("llen")); unblock
     case "rpush"      => value ++= args; payload.deliver(run("llen")); unblock
     case "lpushx"     => run("lpush")
@@ -370,6 +413,7 @@ class SetNode extends Node {
 
   var value = Set[String]()
 
+  // broken - no routing
   def others(keys: Seq[String]) = {
     val timeout_ = 2 seconds
     implicit val timeout: Timeout = timeout_
@@ -382,6 +426,7 @@ class SetNode extends Node {
   }
 
   def run = {
+    case "_srenamed"   => renamed("smembers", value)
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
     case "srem"        => val x = (args.toSet & value).size; value --= args; x
     case "scard"       => value.size
@@ -403,23 +448,6 @@ class SetNode extends Node {
 
 }
 
-class Collector(keys: Seq[String], payload: Payload) extends BaseActor {
-
-  val responses = MutableMap[String, Any]()
-
-  keys.foreach {key => route(Payload(Seq("get", key), toNode=Option(self)))}
-
-  def receive = {
-    case response: Response =>
-      responses(response.key) = response.value
-      if (responses.size == keys.size) {
-        payload.deliver(keys.map {key: String => responses(key)})
-        context stop self
-      }
-  }
-
-}
-
 class NodeEntry(val node: ActorRef, val nodeType: String, var expiry: Option[(Long, Cancellable)] = None)
 
 class KeyNode extends BaseHashNode[NodeEntry] {
@@ -428,47 +456,47 @@ class KeyNode extends BaseHashNode[NodeEntry] {
     val x = run("persist") != -2
     if (x) {
       val expires = ((when - System.currentTimeMillis).toInt milliseconds)
-      value(args(0)).expiry = Option((when, context.system.scheduler.scheduleOnce(expires) {
-        self ! Payload(Seq("del", args(0)))
+      value(payload.key).expiry = Option((when, context.system.scheduler.scheduleOnce(expires) {
+        self ! Payload(Seq("_del", payload.key))
       }))
     }; x
   }
 
   def ttl = {
-    if (run("exists") == false) -2
-    else value(args(0)).expiry match {
+    if (!exists(payload.key)) -2
+    else value(payload.key).expiry match {
       case None => -1
       case Some((when, _)) => when - System.currentTimeMillis
     }
   }
 
   override def run = ({
-    case "keys"      => run("hkeys")
-    case "scan"      => run("hscan")
-    case "exists"    => run("hexists")
-    case "randomkey" => value.keys.toSeq(Random.nextInt(value.size))
-    case "mget"      => context.system.actorOf(Props(new Collector(args, payload))); ()
-    case "mset"      => argPairs.foreach {args => route(Payload(Seq("set", args._1, args._2)))}; "OK"
-    case "msetnx"    => val x = argPairs.filter(args => !value.contains(args._1)).isEmpty; if (x) {run("mset")}; x
-    case "ttl"       => ttl / 1000
-    case "pttl"      => ttl
-    case "expire"    => expire(System.currentTimeMillis + (args(1).toInt * 1000))
-    case "pexpire"   => expire(System.currentTimeMillis + args(1).toInt)
-    case "expireat"  => expire(args(1).toLong / 1000)
-    case "pexpireat" => expire(args(1).toLong)
-    case "sort"      => "Not implemented"
-    case "type"      => if (exists) value(args(0)).nodeType else "nil"
-    case "rename"    =>
-      if (args(0) != args(1)) {
-        if (value.contains(args(1))) value(args(1)).node ! "del"
-        value(args(1)) = value(args(0))
-        value -= args(0)
+    case "_del"       => val x = exists(payload.key); value -= payload.key; x
+    case "_keys"      => value.keys
+    case "exists"     => exists(payload.key)
+    case "ttl"        => ttl / 1000
+    case "pttl"       => ttl
+    case "expire"     => expire(System.currentTimeMillis + (args(0).toInt * 1000))
+    case "pexpire"    => expire(System.currentTimeMillis + args(0).toInt)
+    case "expireat"   => expire(args(0).toLong / 1000)
+    case "pexpireat"  => expire(args(0).toLong)
+    case "sort"       => "Not implemented"
+    case "type"       => if (exists(payload.key)) value(args(0)).nodeType else "nil"
+    case "renamenx"   => val x = exists(payload.key); if (x) {run("rename")}; x
+    case "rename"     =>
+      if (payload.key != args(0)) {
+        route(Payload(Seq("_del", args(0))))
+        val command = value(payload.key).nodeType match {
+          case "string" => "_renamed"
+          case "hash"   => "_hrenamed"
+          case "list"   => "_lrenamed"
+          case "set"    => "_srenamed"
+        }
+        route(Payload(Seq(command, payload.key, args(0))))
         "OK"
       } else "error"
-    case "renamenx"  => val x = value.contains(args(1)); if (x) {run("rename")}; x
-    case "del"       => val x = args.filter(value.contains(_)).map(value(_).node ! "del"); value --= args; x.size
-    case "persist"   =>
-      val x = exists
+    case "persist"    =>
+      val x = exists(payload.key)
       if (x) {
         value(args(0)).expiry match {
           case None =>
@@ -479,26 +507,26 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
   override def receive = ({
     case Unrouted(payload) =>
-      val exists = value.contains(payload.key)
       val cantExist = payload.command == "lpushx" || payload.command == "rpushx"
       val mustExist = payload.command == "setnx"
       val default = Commands.default(payload.command, payload.args)
-      val invalid = exists && value(payload.key).nodeType != payload.nodeType
+      val invalid = exists(payload.key) && value(payload.key).nodeType != payload.nodeType
       if (payload.forKeyNode) {
         self ! payload
       } else if (invalid) {
         payload.deliver(s"Invalid command ${payload.command} for ${value(payload.key).nodeType}")
-      } else if (exists && !cantExist) {
+      } else if (exists(payload.key) && !cantExist) {
         value(payload.key).node ! payload
-      } else if (!exists && default != ()) {
+      } else if (!exists(payload.key) && default != ()) {
         payload.deliver(default)
-      } else if (!exists && !mustExist) {
-        val node = context.system.actorOf(payload.nodeType match {
+      } else if (!exists(payload.key) && !mustExist) {
+        log.info(s"Creating ${payload.nodeType} node for key ${payload.key} via command ${payload.command}")
+        val node = context.actorOf(payload.nodeType match {
           case "string" => Props[StringNode]
           case "hash"   => Props[HashNode]
           case "list"   => Props[ListNode]
           case "set"    => Props[SetNode]
-        })
+        }, s"key-${payload.key}-at-${System.currentTimeMillis}")
         value(payload.key) = new NodeEntry(node, payload.nodeType)
         node ! payload
       } else payload.deliver(0)
@@ -506,30 +534,105 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
 }
 
-class Connection extends BaseActor {
+abstract class Aggregator(command: String, payload: Payload) extends BaseActor {
+
+  val responses = MutableMap[String, Any]()
+  def complete: Any
+  def keys = payload.args
+
+  keys.foreach {key => route(Payload(Seq(command, key), toNode=Option(self)))}
+
+  def receive = {
+    case response: Response =>
+      responses(response.key) = response.value
+      if (responses.size == keys.size) {
+        payload.deliver(complete)
+        context stop self
+      }
+  }
+
+}
+
+class AggregateMget(payload: Payload) extends Aggregator("get", payload) {
+  override def complete = keys.map((key: String) => responses(key))
+}
+
+class AggregateDel(payload: Payload) extends Aggregator("_del", payload) {
+  override def complete = responses.filter((arg: (String, Any)) => arg._2 == true).size
+}
+
+class AggregateMsetnx(payload: Payload) extends Aggregator("exists", payload) {
+  override def keys = payload.argPairs.map(_._1)
+  override def complete = {
+    val x = responses.filter((arg: (String, Any)) => arg._2 == true).isEmpty
+    if (x) payload.argPairs.foreach {args => route(Payload(Seq("set", args._1, args._2)))}
+    x
+  }
+}
+
+class AggregateKeys(payload: Payload) extends BaseActor {
+
+  val responses = ArrayBuffer[Iterable[String]]()
+  var keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
+
+  def complete = responses.reduce(_ ++ _)
+
+  context.system.actorSelection("/user/keys") ! Broadcast(Payload(Seq("_keys"), toNode=Option(self)))
+
+  def receive = {
+    case Response(value, _) =>
+      responses += value.asInstanceOf[Iterable[String]]
+      if (responses.size == keyNodes) {
+        payload.deliver(complete)
+        context stop self
+      }
+  }
+
+}
+
+class AggregateRandomKey(payload: Payload) extends AggregateKeys(payload: Payload) {
+  override def complete = {
+    val keys = super.complete.toSeq
+    if (keys.size > 0) Seq(keys(Random.nextInt(keys.size)))
+    else Seq()
+  }
+}
+
+class ClientNode extends Node {
 
   val buffer = new StringBuilder()
 
-  override def receive = {
-    case Tcp.PeerClosed => log.debug("Disconnected"); context stop self
+  def run = {
+    case "mset"      => payload.argPairs.foreach {args => route(Payload(Seq("set", args._1, args._2)))}; "OK"
+    case "msetnx"    => aggregate
+    case "mget"      => aggregate
+    case "del"       => aggregate
+    case "keys"      => aggregate
+    case "randomkey" => aggregate
+  }
+
+  override def receive = ({
+    case Tcp.PeerClosed => log.info("Disconnected"); context stop self
     case Tcp.Received(data) =>
       val received = data.utf8String
       buffer.append(received)
       if (received.endsWith("\n")) {
         val data = buffer.stripLineEnd; buffer.clear()
         val payload = new Payload(data.split(' '), toClient=Option(sender()))
-        log.debug(s"Received ${data}".replace("\n", " "))
-        if (payload.nodeType == "") {
+        log.info(s"Received ${data}".replace("\n", " "))
+        if (payload.forClientNode) {
+          self ! payload
+        } else if (payload.nodeType == "") {
           payload.deliver("Unknown command")
         } else if (payload.key == "") {
-          payload.deliver("Missing key")
+          payload.deliver("No key specified")
         } else if (!Commands.argsInRange(payload.command, payload.args)) {
           payload.deliver("Invalid number of args")
         } else {
           route(payload)
         }
       }
-  }
+  }: Receive) orElse super.receive
 
 }
 
@@ -540,10 +643,10 @@ class Server(host: String, port: Int) extends BaseActor {
   IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
 
   def receive = {
-    case Tcp.Bound(local) => log.debug(s"Listening on $local")
+    case Tcp.Bound(local) => log.info(s"Listening on $local")
     case Tcp.Connected(remote, local) =>
-      log.debug(s"Accepted connection from $remote")
-      sender() ! Tcp.Register(context.actorOf(Props[Connection]))
+      log.info(s"Accepted connection from $remote")
+      sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
   }
 
 }
@@ -552,7 +655,8 @@ object CurioDB extends App {
   val system = ActorSystem()
   val host = system.settings.config.getString("curiodb.host")
   val port = system.settings.config.getInt("curiodb.port")
-  system.actorOf(Props[KeyNode], "keys")
+  val keyNodes = system.settings.config.getInt("curiodb.keynodes")
+  system.actorOf(ConsistentHashingPool(keyNodes).props(Props[KeyNode]), name = "keys")
   system.actorOf(Props(new Server(host, port)), "server")
   system.awaitTermination()
 }
