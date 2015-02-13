@@ -1,6 +1,6 @@
 package curiodb
 
-import akka.actor.{ActorSystem, Actor, ActorSelection, ActorRef, ActorLogging, Cancellable, Props}
+import akka.actor.{ActorSystem, Actor, ActorContext, ActorSelection, ActorRef, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.io.{IO, Tcp}
 import akka.pattern.ask
@@ -11,7 +11,7 @@ import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHash
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.Random
+import scala.util.{Success, Failure, Random, Try}
 import java.net.InetSocketAddress
 
 class Spec(val args: Any, val default: (Seq[String] => Any))
@@ -123,8 +123,8 @@ object Commands {
     ),
 
     "keys" -> Map(
-      "_del"         -> Spec(args = 1, default = nil),
-      "_keys"        -> Spec(),
+      "_del"         -> Spec(default = nil),
+      "_keys"        -> Spec(args = 0 to 1),
       "exists"       -> Spec(),
       "expire"       -> Spec(args = 2),
       "expireat"     -> Spec(args = 2),
@@ -151,11 +151,13 @@ object Commands {
 
   )
 
-  def get(command: String) = specs.find(_._2.contains(command)).get
+  def get(command: String) =
+    specs.find(_._2.contains(command)).getOrElse(("", Map[String, Spec]()))
+
+  def default(command: String, args: Seq[String]) =
+    get(command)._2(command).default(args)
 
   def nodeType(command: String) = get(command)._1
-
-  def default(command: String, args: Seq[String]) = get(command)._2(command).default(args)
 
   def argsInRange(command: String, args: Seq[String]) =
     get(command)._2(command).args match {
@@ -178,10 +180,7 @@ case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None
   def argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
   def deliver(response: Any) = {
-    destination match {
-      case Some(dest) if response != () => dest ! Response(key, response)
-      case _ =>
-    }
+    destination.foreach {dest => if (response != ()) dest ! Response(key, response)}
   }
 
 }
@@ -192,23 +191,28 @@ case class Unrouted(payload: Payload) extends ConsistentHashable {
 
 case class Response(key: String, value: Any)
 
+case class PayloadError(message: String) extends Exception(message)
+
 abstract class BaseActor extends Actor with ActorLogging {
-
-  def route(
-    input: Seq[Any] = Seq(),
-    destination: Option[ActorRef] = None,
-    payload: Option[Payload] = None) = {
-
-    context.system.actorSelection("/user/keys") ! Unrouted(payload match {
-      case None => Payload(input, destination)
-      case Some(payload) => payload
-    })
-
-  }
 
   def receiver: Receive
 
   def receive = LoggingReceive(receiver)
+
+  def route(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) = {
+    val payload = Payload(input, destination)
+    if (payload.forClientNode) {
+      destination.foreach {dest => dest ! payload}
+    } else if (payload.nodeType == "") {
+      throw PayloadError("Unknown command")
+    } else if (payload.key == "") {
+      throw PayloadError("No key specified")
+    } else if (!Commands.argsInRange(payload.command, payload.args)) {
+      throw PayloadError("Invalid number of args")
+    } else {
+      context.system.actorSelection("/user/keys") ! Unrouted(payload)
+    }
+  }
 
 }
 
@@ -230,12 +234,10 @@ abstract class Node extends BaseActor {
     case "del" => context stop self
     case p: Payload =>
       payload = p
-      val response = try {
-        run(p.command)
-      } catch {
-        case e: Throwable => log.error(s"$e"); "error"
-      }
-      payload.deliver(response)
+      payload.deliver(Try(run(p.command)) match {
+        case Success(response) => response
+        case Failure(e) => log.error(s"$e"); "error"
+      })
   }
 
   def aggregate: Unit = {
@@ -248,19 +250,21 @@ abstract class Node extends BaseActor {
     }, payload), s"aggregate-${randKey}")
   }
 
+  def pattern(values: Iterable[String], pattern: String) = {
+    val regex = ("^" + args(1).map {
+      case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
+      case '*' => ".*"
+      case '?' => "."
+      case c => c
+    }.mkString("") + "$").r
+    values.filter(regex.pattern.matcher(_).matches)
+  }
+
   def scan(values: Iterable[String]) = {
     val count = if (args.size >= 3) args(2).toInt else 10
     val start = if (args.size >= 1) args(0).toInt else 0
     val end = start + count
-    val filtered = if (args.size >= 2) {
-      val regex = ("^" + args(1).map {
-        case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
-        case '*' => ".*"
-        case '?' => "."
-        case c => c
-      }.mkString("") + "$").r
-      values.filter(regex.pattern.matcher(_).matches)
-    } else values
+    val filtered = if (args.size >= 2) pattern(values, args(1)) else values
     val next = if (end < filtered.size) end else 0
     Seq(next.toString) ++ filtered.slice(start, end)
   }
@@ -366,23 +370,24 @@ class ListNode extends Node {
     } else run(payload.command.tail)
   }
 
-  def unblock = {
+  def unblock(result: Any) = {
     while (value.size > 0 && blocked.size > 0) {
       payload = blocked.head
       blocked -= payload
       payload.deliver(run(payload.command.tail))
     }
+    result
   }
 
-  def run = {
+  def run = ({
     case "_lrenamed"  => renamed("lpush", value)
-    case "lpush"      => args ++=: value; payload.deliver(run("llen")); unblock
-    case "rpush"      => value ++= args; payload.deliver(run("llen")); unblock
+    case "lpush"      => args ++=: value; payload.deliver(run("llen"))
+    case "rpush"      => value ++= args; payload.deliver(run("llen"))
     case "lpushx"     => run("lpush")
     case "rpushx"     => run("rpush")
     case "lpop"       => val x = value(0); value -= x; x
     case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
-    case "lset"       => value(args(0).toInt) = args(1); payload.deliver("OK"); unblock
+    case "lset"       => value(args(0).toInt) = args(1); payload.deliver("OK")
     case "lindex"     => value(args(0).toInt)
     case "lrem"       => value.remove(args(0).toInt)
     case "lrange"     => slice
@@ -394,8 +399,8 @@ class ListNode extends Node {
     case "rpoplpush"  => val x = run("rpop"); route("lpush" +: args :+ x.toString); x
     case "linsert"    =>
       val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
-      if (i >= 0) {value.insert(i, args(2)); payload.deliver(run("llen")); unblock} else -1
-  }
+      if (i >= 0) {value.insert(i, args(2)); payload.deliver(run("llen"))} else -1
+  }: Run) andThen unblock
 
 }
 
@@ -449,7 +454,7 @@ class KeyNode extends BaseHashNode[NodeEntry] {
       val cancellable = context.system.scheduler.scheduleOnce(expires) {
         self ! Payload(Seq("_del", payload.key))
       }
-      value(payload.key).expiry = Option((when, cancellable))
+      value(payload.key).expiry = Some((when, cancellable))
     }; x
   }
 
@@ -463,7 +468,7 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
   override def run = ({
     case "_del"       => val x = exists(payload.key); value -= payload.key; x
-    case "_keys"      => value.keys
+    case "_keys"      => if (payload.key != "") pattern(value.keys, payload.key) else value.keys
     case "exists"     => exists(payload.key)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
@@ -504,10 +509,10 @@ class KeyNode extends BaseHashNode[NodeEntry] {
         self ! payload
       } else if (invalid) {
         payload.deliver(s"Invalid command ${payload.command} for ${value(payload.key).nodeType}")
-      } else if (exists(payload.key) && !cantExist) {
-        value(payload.key).node ! payload
       } else if (!exists(payload.key) && default != ()) {
         payload.deliver(default)
+      } else if (exists(payload.key) && !cantExist) {
+        value(payload.key).node ! payload
       } else if (!exists(payload.key) && !mustExist) {
         val node = context.actorOf(payload.nodeType match {
           case "string" => Props[StringNode]
@@ -528,7 +533,7 @@ abstract class Aggregator(command: String, payload: Payload) extends BaseActor {
   def complete: Any
   def keys = payload.args
 
-  keys.foreach {key => route(Seq(command, key), Option(self))}
+  keys.foreach {key => route(Seq(command, key), Some(self))}
 
   def receiver = {
     case Response(key, value) =>
@@ -565,7 +570,9 @@ class AggregateKeys(payload: Payload) extends BaseActor {
 
   def complete = responses.reduce(_ ++ _)
 
-  context.system.actorSelection("/user/keys") ! Broadcast(Payload(Seq("_keys"), Option(self)))
+  val args = if (payload.key != "") Seq("_keys", payload.key) else Seq("_keys")
+
+  context.system.actorSelection("/user/keys") ! Broadcast(Payload(args, Some(self)))
 
   def receiver = {
     case Response(_, value) =>
@@ -599,27 +606,20 @@ class ClientNode extends Node {
     case "randomkey" => aggregate
   }
 
-  def reply(data: String) = client.get ! Tcp.Write(ByteString(data + "\n"))
+  def reply(data: String) = client.foreach {client =>
+    client ! Tcp.Write(ByteString(data + "\n"))
+  }
 
   override def receiver = ({
     case Tcp.Received(data) =>
       val received = data.utf8String
       buffer.append(received)
       if (received.endsWith("\n")) {
-        val payload = new Payload(buffer.stripLineEnd.split(' '), Option(self))
-        buffer.clear()
-        client = Option(sender())
-        if (payload.forClientNode) {
-          self ! payload
-        } else if (payload.nodeType == "") {
-          reply("Unknown command")
-        } else if (payload.key == "") {
-          reply("No key specified")
-        } else if (!Commands.argsInRange(payload.command, payload.args)) {
-          reply("Invalid number of args")
-        } else {
-          route(payload = Option(payload))
+        client = Some(sender())
+        Try(route(buffer.stripLineEnd.split(' '), Some(self))) recover {
+          case error: PayloadError => reply(error.message)
         }
+        buffer.clear()
       }
     case Tcp.PeerClosed => context stop self
     case Response(_, value) =>
@@ -639,8 +639,7 @@ class Server(host: String, port: Int) extends BaseActor {
   IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
 
   def receiver = {
-    case Tcp.Connected(remote, local) =>
-      sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
+    case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
   }
 
 }
