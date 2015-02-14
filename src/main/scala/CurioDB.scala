@@ -176,8 +176,29 @@ case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None
   val forClientNode = nodeType == "client"
   val key = if (input.size > 1 && !forClientNode) input(1).toString else ""
   val args = input.slice(if (forClientNode) 1 else 2, input.size).map(_.toString)
+  lazy val  argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
-  def argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
+  def routeError = {
+    if (nodeType == "") Some("Unknown command")
+    else if (key == "" && !forClientNode) Some("No key specified")
+    else if (!Commands.argsInRange(command, args)) Some("Invalid number of args")
+    else None
+  }
+
+  def keyError(keyExists: Boolean, existingNodeType: String) = {
+
+    val invalidType = !forKeyNode && keyExists && existingNodeType != nodeType
+    val cantExist = command == "lpushx" || command == "rpushx"
+    val mustExist = command == "setnx"
+    val default = Commands.default(command, args)
+
+    if (invalidType) Some(s"Invalid command ${command} ${nodeType} for ${existingNodeType}")
+    else if (keyExists && cantExist) Some(0)
+    else if (!keyExists && mustExist) Some(0)
+    else if (!keyExists && default != ()) Some(default)
+    else None
+
+  }
 
   def deliver(response: Any) = {
     destination.foreach {dest => if (response != ()) dest ! Response(key, response)}
@@ -201,16 +222,11 @@ abstract class BaseActor extends Actor with ActorLogging {
 
   def route(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) = {
     val payload = Payload(input, destination)
-    if (payload.forClientNode) {
-      destination.foreach {dest => dest ! payload}
-    } else if (payload.nodeType == "") {
-      throw PayloadError("Unknown command")
-    } else if (payload.key == "") {
-      throw PayloadError("No key specified")
-    } else if (!Commands.argsInRange(payload.command, payload.args)) {
-      throw PayloadError("Invalid number of args")
-    } else {
-      context.system.actorSelection("/user/keys") ! Unrouted(payload)
+    payload.routeError match {
+      case Some(error) => payload.deliver(error)
+      case None =>
+        if (payload.forClientNode) destination.foreach {dest => dest ! payload}
+        else context.system.actorSelection("/user/keys") ! Unrouted(payload)
     }
   }
 
@@ -251,6 +267,7 @@ abstract class Node extends BaseActor {
   }
 
   def pattern(values: Iterable[String], pattern: String) = {
+    // not working for keys command.
     val regex = ("^" + args(1).map {
       case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
       case '*' => ".*"
@@ -501,28 +518,25 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
   override def receiver = ({
     case Unrouted(payload) =>
-      val cantExist = payload.command == "lpushx" || payload.command == "rpushx"
-      val mustExist = payload.command == "setnx"
-      val default = Commands.default(payload.command, payload.args)
-      val invalid = exists(payload.key) && value(payload.key).nodeType != payload.nodeType
-      if (payload.forKeyNode) {
-        self ! payload
-      } else if (invalid) {
-        payload.deliver(s"Invalid command ${payload.command} for ${value(payload.key).nodeType}")
-      } else if (!exists(payload.key) && default != ()) {
-        payload.deliver(default)
-      } else if (exists(payload.key) && !cantExist) {
-        value(payload.key).node ! payload
-      } else if (!exists(payload.key) && !mustExist) {
-        val node = context.actorOf(payload.nodeType match {
-          case "string" => Props[StringNode]
-          case "hash"   => Props[HashNode]
-          case "list"   => Props[ListNode]
-          case "set"    => Props[SetNode]
-        }, s"${payload.key}-${randKey}")
-        value(payload.key) = new NodeEntry(node, payload.nodeType)
-        node ! payload
-      } else payload.deliver(0)
+      val keyExists = exists(payload.key)
+      val nodeType = if (keyExists) value(payload.key).nodeType else ""
+      payload.keyError(keyExists, nodeType) match {
+        case Some(error) => payload.deliver(error)
+        case None =>
+          val node = if (payload.forKeyNode) self
+            else if (keyExists) value(payload.key).node
+            else {
+              val created = context.actorOf(payload.nodeType match {
+                case "string" => Props[StringNode]
+                case "hash"   => Props[HashNode]
+                case "list"   => Props[ListNode]
+                case "set"    => Props[SetNode]
+              }, s"${payload.key}-${randKey}")
+              value(payload.key) = new NodeEntry(created, payload.nodeType)
+              created
+            }
+          node ! payload
+      }
   }: Receive) orElse super.receiver
 
 }
@@ -606,42 +620,32 @@ class ClientNode extends Node {
     case "randomkey" => aggregate
   }
 
-  def reply(data: String) = client.foreach {client =>
-    client ! Tcp.Write(ByteString(data + "\n"))
-  }
-
   override def receiver = ({
     case Tcp.Received(data) =>
       val received = data.utf8String
       buffer.append(received)
       if (received.endsWith("\n")) {
         client = Some(sender())
-        Try(route(buffer.stripLineEnd.split(' '), Some(self))) recover {
-          case error: PayloadError => reply(error.message)
-        }
+        route(buffer.stripLineEnd.split(' '), destination = Some(self))
         buffer.clear()
       }
     case Tcp.PeerClosed => context stop self
     case Response(_, value) =>
-      reply(value match {
+      val message = (value match {
         case x: Iterable[Any] => x.mkString("\n")
         case x: Boolean => if (x) "1" else "0"
         case x => x.toString
       })
+      client.foreach {client => client ! Tcp.Write(ByteString(message + "\n"))
+  }
   }: Receive) orElse super.receiver
 
 }
 
 class Server(host: String, port: Int) extends BaseActor {
-
   import context.system
-
   IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
-
-  def receiver = {
-    case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
-  }
-
+  def receiver = {case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))}
 }
 
 object CurioDB extends App {
