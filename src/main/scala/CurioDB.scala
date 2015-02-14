@@ -250,7 +250,7 @@ abstract class Node extends BaseActor {
     case "del" => context stop self
     case p: Payload =>
       payload = p
-      payload.deliver(Try(run(p.command)) match {
+      payload.deliver(Try(run(payload.command)) match {
         case Success(response) => response
         case Failure(e) => log.error(s"$e"); "error"
       })
@@ -267,8 +267,7 @@ abstract class Node extends BaseActor {
   }
 
   def pattern(values: Iterable[String], pattern: String) = {
-    // not working for keys command.
-    val regex = ("^" + args(1).map {
+    val regex = ("^" + pattern.map {
       case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
       case '*' => ".*"
       case '?' => "."
@@ -569,6 +568,11 @@ class AggregateDel(payload: Payload) extends Aggregator("_del", payload) {
 }
 
 class AggregateMsetnx(payload: Payload) extends Aggregator("exists", payload) {
+  // This is hugely slow since it needs to run exists once per key.
+  // What we need is a way to initially group the keys by hash value,
+  // then send each group as one payload. This would form a strategy for
+  // exists handling multiple keys in general, in which case it would
+  // become a ClientNode command.
   override def keys = payload.argPairs.map(_._1)
   override def complete = {
     val x = responses.filter((arg: (String, Any)) => arg._2 == true).isEmpty
@@ -581,12 +585,11 @@ class AggregateKeys(payload: Payload) extends BaseActor {
 
   val responses = ArrayBuffer[Iterable[String]]()
   var keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
+  val broadcast = Payload("_keys" +: payload.args, Some(self))
+
+  context.system.actorSelection("/user/keys") ! Broadcast(broadcast)
 
   def complete = responses.reduce(_ ++ _)
-
-  val args = if (payload.key != "") Seq("_keys", payload.key) else Seq("_keys")
-
-  context.system.actorSelection("/user/keys") ! Broadcast(Payload(args, Some(self)))
 
   def receiver = {
     case Response(_, value) =>
@@ -600,6 +603,8 @@ class AggregateKeys(payload: Payload) extends BaseActor {
 }
 
 class AggregateRandomKey(payload: Payload) extends AggregateKeys(payload: Payload) {
+  // This is slower than it needs to be,
+  // it should only wait for one response.
   override def complete = {
     val keys = super.complete.toSeq
     if (keys.size > 0) Seq(keys(Random.nextInt(keys.size))) else Seq()
@@ -645,7 +650,9 @@ class ClientNode extends Node {
 class Server(host: String, port: Int) extends BaseActor {
   import context.system
   IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
-  def receiver = {case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))}
+  def receiver = {
+    case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
+  }
 }
 
 object CurioDB extends App {
