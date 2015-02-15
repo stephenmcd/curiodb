@@ -1,14 +1,12 @@
 package curiodb
 
-import akka.actor.{ActorSystem, Actor, ActorContext, ActorSelection, ActorRef, ActorLogging, Cancellable, Props}
+import akka.actor.{ActorSystem, Actor, ActorContext, ActorRef, ActorLogging, Cancellable, Props}
 import akka.event.LoggingReceive
 import akka.io.{IO, Tcp}
-import akka.pattern.ask
 import akka.routing.{Broadcast, ConsistentHashingPool}
 import akka.routing.ConsistentHashingRouter.ConsistentHashable
-import akka.util.{ByteString, Timeout}
+import akka.util.ByteString
 import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHashSet}
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure, Random, Try}
@@ -41,7 +39,7 @@ object Commands {
   val specs = Map(
 
     "string" -> Map(
-      "_renamed"     -> Spec(args = 1, default = nil),
+      "_rename"     -> Spec(args = 1, default = nil),
       "append"       -> Spec(args = 1),
       "bitcount"     -> Spec(args = 0 to 2, default = zero),
       "bitop"        -> Spec(args = 3 to many, default = zero),
@@ -65,7 +63,7 @@ object Commands {
     ),
 
     "hash" -> Map(
-      "_hrenamed"    -> Spec(args = 1, default = nil),
+      "_hrename"    -> Spec(args = 1, default = nil),
       "hdel"         -> Spec(args = 1 to many, default = zeros),
       "hexists"      -> Spec(args = 1, default = zero),
       "hget"         -> Spec(args = 1, default = nil),
@@ -83,7 +81,7 @@ object Commands {
     ),
 
     "list" -> Map(
-      "_lrenamed"    -> Spec(args = 1, default = nil),
+      "_lrename"    -> Spec(args = 1, default = nil),
       "blpop"        -> Spec(args = 1 to many, default = nil),
       "brpop"        -> Spec(args = 1 to many, default = nil),
       "brpoplpush"   -> Spec(args = 2, default = nil),
@@ -104,7 +102,7 @@ object Commands {
     ),
 
     "set" -> Map(
-      "_srenamed"    -> Spec(args = 1, default = nil),
+      "_srename"    -> Spec(args = 1, default = nil),
       "_sstore"      -> Spec(args = 1 to many),
       "sadd"         -> Spec(args = 1 to many),
       "scard"        -> Spec(default = zero),
@@ -120,18 +118,19 @@ object Commands {
     "keys" -> Map(
       "_del"         -> Spec(default = nil),
       "_keys"        -> Spec(args = 0 to 1),
+      "_randomkey"   -> Spec(keyed = false),
       "exists"       -> Spec(),
-      "expire"       -> Spec(args = 2),
-      "expireat"     -> Spec(args = 2),
+      "expire"       -> Spec(args = 1),
+      "expireat"     -> Spec(args = 1),
       "persist"      -> Spec(args = 1),
-      "pexpire"      -> Spec(args = 2),
-      "pexpireat"    -> Spec(args = 2),
-      "pttl"         -> Spec(args = 1),
+      "pexpire"      -> Spec(args = 1),
+      "pexpireat"    -> Spec(args = 1),
+      "pttl"         -> Spec(),
       "rename"       -> Spec(args = 1, default = error),
       "renamenx"     -> Spec(args = 1, default = error),
       "sort"         -> Spec(args = 1 to many, default = seq),
-      "ttl"          -> Spec(args = 1),
-      "type"         -> Spec(args = 1)
+      "ttl"          -> Spec(),
+      "type"         -> Spec()
     ),
 
     "client" -> Map(
@@ -156,7 +155,7 @@ object Commands {
 
   def default(command: String, args: Seq[String]) = get(command)._2(command).default(args)
 
-  def hasKey(command: String) = get(command)._2(command).keyed
+  def keyed(command: String): Boolean = get(command)._2(command).keyed
 
   def nodeType(command: String) = get(command)._1
 
@@ -174,13 +173,13 @@ case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val forKeyNode = nodeType == "keys"
   val forClientNode = nodeType == "client"
-  val key = if (input.size > 1 && Commands.hasKey(command)) input(1).toString else ""
+  val key = if (input.size > 1 && Commands.keyed(command)) input(1).toString else ""
   val args = input.slice(if (key == "") 1 else 2, input.size).map(_.toString)
   lazy val argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
   def routeError = {
     if (nodeType == "") Some("Unknown command")
-    else if (key == "" && Commands.hasKey(command)) Some("No key specified")
+    else if (key == "" && Commands.keyed(command)) Some("No key specified")
     else if (!Commands.argsInRange(command, args)) Some("Invalid number of args")
     else None
   }
@@ -193,8 +192,7 @@ case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None
     val default = Commands.default(command, args)
 
     if (invalidType) Some(s"Invalid command ${command} for ${existingNodeType}")
-    else if (keyExists && cantExist) Some(0)
-    else if (!keyExists && mustExist) Some(0)
+    else if ((keyExists && cantExist) || (!keyExists && mustExist)) Some(0)
     else if (!keyExists && default != ()) Some(default)
     else None
 
@@ -212,13 +210,14 @@ case class Unrouted(payload: Payload) extends ConsistentHashable {
 
 case class Response(key: String, value: Any)
 
-case class PayloadError(message: String) extends Exception(message)
+trait PayloadProcessing {
 
-abstract class BaseActor extends Actor with ActorLogging {
+  val context: ActorContext
+  var payload = Payload()
 
-  def receiver: Receive
+  def args = payload.args
 
-  def receive = LoggingReceive(receiver)
+  def argPairs = payload.argPairs
 
   def route(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) = {
     val payload = Payload(input, destination)
@@ -235,24 +234,19 @@ abstract class BaseActor extends Actor with ActorLogging {
 
 }
 
-abstract class Node extends BaseActor {
+object Rand {
 
-  implicit var payload = Payload()
-  type Run = PartialFunction[String, Any]
-  def run: Run
-  def args = payload.args
-  def argPairs = payload.argPairs
-  def randKey = Random.alphanumeric.take(8).mkString
+  def string(size: Int = 8) = Random.alphanumeric.take(size).mkString
 
-  def receiver = {
-    case "del" => context stop self
-    case p: Payload =>
-      payload = p
-      payload.deliver(Try(run(payload.command)) match {
-        case Success(response) => response
-        case Failure(e) => log.error(s"$e"); "error"
-      })
+  def item(seq: Iterable[String]) = {
+    if (seq.isEmpty) "" else seq.toSeq(Random.nextInt(seq.size))
   }
+
+}
+
+trait Scanning {
+
+  def args: Seq[String]
 
   def pattern(values: Iterable[String], pattern: String) = {
     val regex = ("^" + pattern.map {
@@ -273,7 +267,33 @@ abstract class Node extends BaseActor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
-  def renamed(to: String, value: Any) = {
+}
+
+abstract class LoggingActor extends Actor with ActorLogging {
+
+  def receiver: Receive
+
+  def receive = LoggingReceive(receiver)
+
+}
+
+abstract class Node extends LoggingActor with PayloadProcessing {
+
+  type Run = PartialFunction[String, Any]
+
+  def run: Run
+
+  def receiver = {
+    case "del" => context stop self
+    case p: Payload =>
+      payload = p
+      payload.deliver(Try(run(payload.command)) match {
+        case Success(response) => response
+        case Failure(e) => log.error(s"$e"); "error"
+      })
+  }
+
+  def rename(to: String, value: Any) = {
     route(Seq("_del", payload.key))
     route(Seq(to, args(0)) ++ (value match {
       case x: Iterable[Any] => x
@@ -292,7 +312,7 @@ class StringNode extends Node {
   def expire(command: String) = route(Seq(command, payload.key, args(1)))
 
   def run = {
-    case "_renamed"    => renamed("set", value)
+    case "_rename"     => rename("set", value)
     case "get"         => value
     case "set"         => value = args(0); "OK"
     case "setnx"       => run("set"); true
@@ -317,7 +337,7 @@ class StringNode extends Node {
 
 }
 
-class BaseHashNode[T] extends Node {
+class BaseHashNode[T] extends Node with Scanning {
 
   var value = MutableMap[String, T]()
 
@@ -338,7 +358,7 @@ class HashNode extends BaseHashNode[String] {
   def flatten = value.map(x => Seq(x._1, x._2)).flatten
 
   override def run = ({
-    case "_hrenamed"    => renamed("hmset", flatten)
+    case "_hrename"     => rename("hmset", flatten)
     case "hget"         => value.get(args(0))
     case "hsetnx"       => if (exists(args(0))) run("hset") else false
     case "hgetall"      => flatten
@@ -365,7 +385,7 @@ class ListNode extends Node {
   }
 
   def block: Any = {
-    if (value.size == 0) {
+    if (value.isEmpty) {
       blocked += payload
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= payload
@@ -384,7 +404,7 @@ class ListNode extends Node {
   }
 
   def run = ({
-    case "_lrenamed"  => renamed("lpush", value)
+    case "_lrename"   => rename("lpush", value)
     case "lpush"      => args ++=: value; payload.deliver(run("llen"))
     case "rpush"      => value ++= args; payload.deliver(run("llen"))
     case "lpushx"     => run("lpush")
@@ -408,23 +428,20 @@ class ListNode extends Node {
 
 }
 
-class SetNode extends Node {
+class SetNode extends Node with Scanning {
 
   var value = Set[String]()
 
   def run = {
-    case "_srenamed"   => renamed("smembers", value)
+    case "_srename"    => rename("smembers", value)
     case "_sstore"     => value.clear; run("sadd")
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
     case "srem"        => val x = (args.toSet & value).size; value --= args; x
     case "scard"       => value.size
     case "sismember"   => value.contains(args(0))
     case "smembers"    => value
-    case "srandmember" => value.toSeq(Random.nextInt(value.size))
+    case "srandmember" => Rand.item(value)
     case "spop"        => val x = run("srandmember"); value -= x.toString; x
-    // case "sdiffstore"  => value = others(args).reduce(_ &~ _); run("scard")
-    // case "sinterstore" => value = others(args).reduce(_ & _); run("scard")
-    // case "sunionstore" => value = others(args).reduce(_ | _); run("scard")
     case "sscan"       => scan(value)
     case "smove"       =>
       val x = value.contains(args(1))
@@ -459,6 +476,7 @@ class KeyNode extends BaseHashNode[NodeEntry] {
   override def run = ({
     case "_del"       => val x = exists(payload.key); value -= payload.key; x
     case "_keys"      => if (payload.key != "") pattern(value.keys, payload.key) else value.keys
+    case "_randomkey" => Rand.item(value.keys)
     case "exists"     => exists(payload.key)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
@@ -473,10 +491,10 @@ class KeyNode extends BaseHashNode[NodeEntry] {
       if (payload.key != args(0)) {
         route(Seq("_del", args(0)))
         val command = value(payload.key).nodeType match {
-          case "string" => "_renamed"
-          case "hash"   => "_hrenamed"
-          case "list"   => "_lrenamed"
-          case "set"    => "_srenamed"
+          case "string" => "_rename"
+          case "hash"   => "_hrename"
+          case "list"   => "_lrename"
+          case "set"    => "_srename"
         }
         route(Seq(command, payload.key, args(0)))
         "OK"
@@ -504,7 +522,7 @@ class KeyNode extends BaseHashNode[NodeEntry] {
                 case "hash"   => Props[HashNode]
                 case "list"   => Props[ListNode]
                 case "set"    => Props[SetNode]
-              }, s"${payload.key}-${randKey}")
+              }, s"${payload.key}-${Rand.string()}")
               value(payload.key) = new NodeEntry(created, payload.nodeType)
               created
             }
@@ -520,23 +538,23 @@ class ClientNode extends Node {
   var client: Option[ActorRef] = None
 
   def aggregate(props: Props): Unit = {
-    context.actorOf(props, s"aggregate-${randKey}") ! payload
+    context.actorOf(props, s"aggregate-${Rand.string()}") ! payload
   }
 
   def run = {
     case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
-    case "msetnx"      => aggregate(Props[AggregateMSETNX])
-    case "mget"        => aggregate(Props[AggregateMGET])
-    case "del"         => aggregate(Props[AggregateDEL])
-    case "keys"        => aggregate(Props[AggregateKEYS])
-    //case "scan"        => aggregate(Props[AggregateSCAN]
-    case "randomkey"   => aggregate(Props[AggregateRANDOMKEY])
-    case "sdiff"       => aggregate(Props[AggregateSDIFF])
-    case "sinter"      => aggregate(Props[AggregateSINTER])
-    case "sunion"      => aggregate(Props[AggregateSUNION])
-    case "sdiffstore"  => aggregate(Props[AggregateSDIFFSTORE])
-    case "sinterstore" => aggregate(Props[AggregateSINTERSTORE])
-    case "sunionstore" => aggregate(Props[AggregateSUNIONSTORE])
+    case "msetnx"      => aggregate(Props[AggregateMSetNX])
+    case "mget"        => aggregate(Props[AggregateMGet])
+    case "del"         => aggregate(Props[AggregateDel])
+    case "keys"        => aggregate(Props[AggregateKeys])
+    case "scan"        => aggregate(Props[AggregateScan])
+    case "randomkey"   => aggregate(Props[AggregateRandomKey])
+    case "sdiff"       => aggregate(Props[AggregateSDiff])
+    case "sinter"      => aggregate(Props[AggregateSInterStore])
+    case "sunion"      => aggregate(Props[AggregateSUnion])
+    case "sdiffstore"  => aggregate(Props[AggregateSDiffStore])
+    case "sinterstore" => aggregate(Props[AggregateSInterStore])
+    case "sunionstore" => aggregate(Props[AggregateSUnionStore])
   }
 
   // TODO: read/write redis protocol.
@@ -562,21 +580,21 @@ class ClientNode extends Node {
 
 }
 
-abstract class Aggregate[T](val command: String) extends BaseActor {
+abstract class Aggregate[T](val command: String) extends LoggingActor with PayloadProcessing {
 
-  implicit var payload = Payload()
   val responses = MutableMap[String, T]()
+  lazy val ordered = args.map((key: String) => responses(key))
+
   def complete: Any
-  def keys = payload.args
-  def begin = keys.foreach {key => route(Seq(command, key), Some(self))}
-  lazy val ordered = keys.map((key: String) => responses(key))
+
+  def begin = args.foreach {key => route(Seq(command, key), Some(self))}
 
   def receiver = {
     case p: Payload => payload = p; begin
     case Response(key, value) =>
       val keyOrIndex = if (key == "") (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
-      if (responses.size == keys.size) {
+      if (responses.size == args.size) {
         payload.deliver(complete)
         context stop self
       }
@@ -586,32 +604,29 @@ abstract class Aggregate[T](val command: String) extends BaseActor {
 
 abstract class AggregateSet(reducer: (Set[String], Set[String]) => Set[String])
   extends Aggregate[Set[String]]("smembers") {
-
   override def complete: Any = ordered.reduce(reducer)
-
 }
 
 class AggregateSetStore(reducer: (Set[String], Set[String]) => Set[String]) extends AggregateSet(reducer) {
-  override def complete = {
+  override def complete: Unit = {
     val result = super.complete.asInstanceOf[Set[String]].toSeq
     route(Seq("_sstore", payload.key) ++ result, destination = payload.destination)
-    ()
   }
 }
 
-class AggregateSDIFF extends AggregateSet(_ &~ _)
+class AggregateSDiff extends AggregateSet(_ &~ _)
 
-class AggregateSINTER extends AggregateSet(_ & _)
+class AggregateSInter extends AggregateSet(_ & _)
 
-class AggregateSUNION extends AggregateSet(_ | _)
+class AggregateSUnion extends AggregateSet(_ | _)
 
-class AggregateSDIFFSTORE extends AggregateSetStore(_ &~ _)
+class AggregateSDiffStore extends AggregateSetStore(_ &~ _)
 
-class AggregateSINTERSTORE extends AggregateSetStore(_ & _)
+class AggregateSInterStore extends AggregateSetStore(_ & _)
 
-class AggregateSUNIONTORE extends AggregateSetStore(_ | _)
+class AggregateSUnionStore extends AggregateSetStore(_ | _)
 
-class AggregateMGET extends Aggregate[String]("get") {
+class AggregateMGet extends Aggregate[String]("get") {
   override def complete = ordered
 }
 
@@ -619,17 +634,17 @@ abstract class AggregateBool(command: String) extends Aggregate[Boolean](command
   def filtered = responses.values.filter(_ == true)
 }
 
-class AggregateDEL extends AggregateBool("_del") {
+class AggregateDel extends AggregateBool("_del") {
   override def complete = filtered.size
 }
 
-class AggregateMSETNX extends AggregateBool("exists") {
+class AggregateMSetNX extends AggregateBool("exists") {
   // This is hugely slow since it needs to run exists once per key.
   // What we need is a way to initially group the keys by hash value,
   // then send each group as one payload. This would form a strategy for
   // exists handling multiple keys in general, in which case it would
   // become a ClientNode command.
-  override def keys = payload.argPairs.map(_._1)
+  override def args = payload.argPairs.map(_._1)
   override def complete = {
     val x = filtered.isEmpty
     if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
@@ -637,24 +652,26 @@ class AggregateMSETNX extends AggregateBool("exists") {
   }
 }
 
-class AggregateKEYS extends Aggregate[Iterable[String]]("_keys") {
+abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
   val keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
   lazy val broadcast = Broadcast(Payload(command +: payload.args, Some(self)))
-  override def keys = (1 to keyNodes).map(_.toString)
+  override def args = (1 to keyNodes).map(_.toString)
   override def begin = context.system.actorSelection("/user/keys") ! broadcast
+}
+
+class AggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
   override def complete = responses.values.reduce(_ ++ _)
 }
 
-class AggregateRANDOMKEY extends AggregateKEYS {
-  // This is slower than it needs to be,
-  // it should only wait for one response.
-  override def complete = {
-    val keys = super.complete.toSeq
-    if (keys.size > 0) Seq(keys(Random.nextInt(keys.size))) else Seq()
-  }
+class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
+  override def complete = Rand.item(responses.values.filter(_ != ""))
 }
 
-class Server(host: String, port: Int) extends BaseActor {
+class AggregateScan extends AggregateKeys with Scanning {
+  override def complete = scan(super.complete)
+}
+
+class Server(host: String, port: Int) extends LoggingActor {
   import context.system
   IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
   def receiver = {
