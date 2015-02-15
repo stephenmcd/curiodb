@@ -14,17 +14,17 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure, Random, Try}
 import java.net.InetSocketAddress
 
-class Spec(val args: Any, val default: (Seq[String] => Any))
+class Spec(val args: Any, val default: (Seq[String] => Any), val keyed: Boolean)
 
 object Spec {
-  def apply(args: Any = 0, default: (Seq[String] => Any) = (_ => ())) = {
-    new Spec(args, default)
+  def apply(args: Any = 0, default: (Seq[String] => Any) = (_ => ()), keyed: Boolean = true) = {
+    new Spec(args, default, keyed)
   }
 }
 
 object Commands {
 
-  val many = Int.MaxValue
+  val many = Int.MaxValue - 1
   val evens = 2 to many by 2
 
   val error    = (_: Seq[String]) => "error"
@@ -49,7 +49,7 @@ object Commands {
       "decr"         -> Spec(),
       "decrby"       -> Spec(args = 1),
       "get"          -> Spec(default = nil),
-      "getbit"       -> Spec(args = 1, zero),
+      "getbit"       -> Spec(args = 1, default = zero),
       "getrange"     -> Spec(args = 2, default = string),
       "getset"       -> Spec(args = 1),
       "incr"         -> Spec(),
@@ -105,21 +105,16 @@ object Commands {
 
     "set" -> Map(
       "_srenamed"    -> Spec(args = 1, default = nil),
+      "_sstore"      -> Spec(args = 1 to many),
       "sadd"         -> Spec(args = 1 to many),
       "scard"        -> Spec(default = zero),
-      "sdiff"        -> Spec(args = 0 to many, default = seq),
-      "sdiffstore"   -> Spec(args = 1 to many, default = zero),
-      "sinter"       -> Spec(args = 0 to many, default = seq),
-      "sinterstore"  -> Spec(args = 1 to many, default = zero),
       "sismember"    -> Spec(args = 1, default = zero),
       "smembers"     -> Spec(default = seq),
       "smove"        -> Spec(args = 2, default = error),
       "spop"         -> Spec(default = nil),
       "srandmember"  -> Spec(args = 0 to 1, default = nil),
       "srem"         -> Spec(args = 1 to many, default = zero),
-      "sscan"        -> Spec(args = 1 to 3, default = scan),
-      "sunion"       -> Spec(args = 0 to many, default = seq),
-      "sunionstore"  -> Spec(args = 1 to many, default = zero)
+      "sscan"        -> Spec(args = 1 to 3, default = scan)
     ),
 
     "keys" -> Map(
@@ -140,22 +135,28 @@ object Commands {
     ),
 
     "client" -> Map(
-      "del"          -> Spec(args = 1 to many),
-      "keys"         -> Spec(args = 1),
-      "scan"         -> Spec(args = 1 to 3),
-      "randomkey"    -> Spec(),
-      "mget"         -> Spec(args = 1 to many),
-      "mset"         -> Spec(args = evens),
-      "msetnx"       -> Spec(args = evens)
+      "sdiff"        -> Spec(args = 0 to many, default = seq, keyed = false),
+      "sdiffstore"   -> Spec(args = 1 to many, default = zero),
+      "sinter"       -> Spec(args = 0 to many, default = seq, keyed = false),
+      "sinterstore"  -> Spec(args = 1 to many, default = zero),
+      "sunion"       -> Spec(args = 0 to many, default = seq, keyed = false),
+      "sunionstore"  -> Spec(args = 1 to many, default = zero),
+      "del"          -> Spec(args = 1 to many, keyed = false),
+      "keys"         -> Spec(args = 1, keyed = false),
+      "scan"         -> Spec(args = 1 to 3, keyed = false),
+      "randomkey"    -> Spec(keyed = false),
+      "mget"         -> Spec(args = 1 to many, keyed = false),
+      "mset"         -> Spec(args = evens, keyed = false),
+      "msetnx"       -> Spec(args = evens, keyed = false)
     )
 
   )
 
-  def get(command: String) =
-    specs.find(_._2.contains(command)).getOrElse(("", Map[String, Spec]()))
+  def get(command: String) = specs.find(_._2.contains(command)).getOrElse(("", Map[String, Spec]()))
 
-  def default(command: String, args: Seq[String]) =
-    get(command)._2(command).default(args)
+  def default(command: String, args: Seq[String]) = get(command)._2(command).default(args)
+
+  def hasKey(command: String) = get(command)._2(command).keyed
 
   def nodeType(command: String) = get(command)._1
 
@@ -169,18 +170,17 @@ object Commands {
 
 case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) {
 
-  // TODO: read redis protocol
   val command = if (input.size > 0) input(0).toString.toLowerCase else ""
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val forKeyNode = nodeType == "keys"
   val forClientNode = nodeType == "client"
-  val key = if (input.size > 1 && !forClientNode) input(1).toString else ""
-  val args = input.slice(if (forClientNode) 1 else 2, input.size).map(_.toString)
-  lazy val  argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
+  val key = if (input.size > 1 && Commands.hasKey(command)) input(1).toString else ""
+  val args = input.slice(if (key == "") 1 else 2, input.size).map(_.toString)
+  lazy val argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 
   def routeError = {
     if (nodeType == "") Some("Unknown command")
-    else if (key == "" && !forClientNode) Some("No key specified")
+    else if (key == "" && Commands.hasKey(command)) Some("No key specified")
     else if (!Commands.argsInRange(command, args)) Some("Invalid number of args")
     else None
   }
@@ -192,7 +192,7 @@ case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None
     val mustExist = command == "setnx"
     val default = Commands.default(command, args)
 
-    if (invalidType) Some(s"Invalid command ${command} ${nodeType} for ${existingNodeType}")
+    if (invalidType) Some(s"Invalid command ${command} for ${existingNodeType}")
     else if (keyExists && cantExist) Some(0)
     else if (!keyExists && mustExist) Some(0)
     else if (!keyExists && default != ()) Some(default)
@@ -225,8 +225,11 @@ abstract class BaseActor extends Actor with ActorLogging {
     payload.routeError match {
       case Some(error) => payload.deliver(error)
       case None =>
-        if (payload.forClientNode) destination.foreach {dest => dest ! payload}
-        else context.system.actorSelection("/user/keys") ! Unrouted(payload)
+        if (payload.forClientNode) {
+          destination.foreach {dest => dest ! payload}
+        } else {
+          context.system.actorSelection("/user/keys") ! Unrouted(payload)
+        }
     }
   }
 
@@ -235,15 +238,10 @@ abstract class BaseActor extends Actor with ActorLogging {
 abstract class Node extends BaseActor {
 
   implicit var payload = Payload()
-
   type Run = PartialFunction[String, Any]
-
   def run: Run
-
   def args = payload.args
-
   def argPairs = payload.argPairs
-
   def randKey = Random.alphanumeric.take(8).mkString
 
   def receiver = {
@@ -254,16 +252,6 @@ abstract class Node extends BaseActor {
         case Success(response) => response
         case Failure(e) => log.error(s"$e"); "error"
       })
-  }
-
-  def aggregate: Unit = {
-    context.actorOf(Props(payload.command match {
-      case "del"       => classOf[AggregateDel]
-      case "mget"      => classOf[AggregateMget]
-      case "msetnx"    => classOf[AggregateMsetnx]
-      case "keys"      => classOf[AggregateKeys]
-      case "randomkey" => classOf[AggregateRandomKey]
-    }, payload), s"aggregate-${randKey}")
   }
 
   def pattern(values: Iterable[String], pattern: String) = {
@@ -424,20 +412,9 @@ class SetNode extends Node {
 
   var value = Set[String]()
 
-  // broken - no routing
-  def others(keys: Seq[String]) = {
-    val timeout_ = 2 seconds
-    implicit val timeout: Timeout = timeout_
-    val futures = Future.traverse(keys.toList) {key =>
-      context.system.actorSelection(s"/user/$key") ? Payload(Seq("smembers", key))
-    }
-    Await.result(futures, timeout_).asInstanceOf[Seq[Response]].map {response: Response =>
-      response.value.asInstanceOf[Set[String]]
-    }
-  }
-
   def run = {
     case "_srenamed"   => renamed("smembers", value)
+    case "_sstore"     => value.clear; run("sadd")
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
     case "srem"        => val x = (args.toSet & value).size; value --= args; x
     case "scard"       => value.size
@@ -445,12 +422,9 @@ class SetNode extends Node {
     case "smembers"    => value
     case "srandmember" => value.toSeq(Random.nextInt(value.size))
     case "spop"        => val x = run("srandmember"); value -= x.toString; x
-    case "sdiff"       => others(args).fold(value)(_ &~ _)
-    case "sinter"      => others(args).fold(value)(_ & _)
-    case "sunion"      => others(args).fold(value)(_ | _)
-    case "sdiffstore"  => value = others(args).reduce(_ &~ _); run("scard")
-    case "sinterstore" => value = others(args).reduce(_ & _); run("scard")
-    case "sunionstore" => value = others(args).reduce(_ | _); run("scard")
+    // case "sdiffstore"  => value = others(args).reduce(_ &~ _); run("scard")
+    // case "sinterstore" => value = others(args).reduce(_ & _); run("scard")
+    // case "sunionstore" => value = others(args).reduce(_ | _); run("scard")
     case "sscan"       => scan(value)
     case "smove"       =>
       val x = value.contains(args(1))
@@ -540,91 +514,32 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
 }
 
-abstract class Aggregator(command: String, payload: Payload) extends BaseActor {
-
-  val responses = MutableMap[String, Any]()
-  def complete: Any
-  def keys = payload.args
-
-  keys.foreach {key => route(Seq(command, key), Some(self))}
-
-  def receiver = {
-    case Response(key, value) =>
-      responses(key) = value
-      if (responses.size == keys.size) {
-        payload.deliver(complete)
-        context stop self
-      }
-  }
-
-}
-
-class AggregateMget(payload: Payload) extends Aggregator("get", payload) {
-  override def complete = keys.map((key: String) => responses(key))
-}
-
-class AggregateDel(payload: Payload) extends Aggregator("_del", payload) {
-  override def complete = responses.filter((arg: (String, Any)) => arg._2 == true).size
-}
-
-class AggregateMsetnx(payload: Payload) extends Aggregator("exists", payload) {
-  // This is hugely slow since it needs to run exists once per key.
-  // What we need is a way to initially group the keys by hash value,
-  // then send each group as one payload. This would form a strategy for
-  // exists handling multiple keys in general, in which case it would
-  // become a ClientNode command.
-  override def keys = payload.argPairs.map(_._1)
-  override def complete = {
-    val x = responses.filter((arg: (String, Any)) => arg._2 == true).isEmpty
-    if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
-    x
-  }
-}
-
-class AggregateKeys(payload: Payload) extends BaseActor {
-
-  val responses = ArrayBuffer[Iterable[String]]()
-  var keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
-  val broadcast = Payload("_keys" +: payload.args, Some(self))
-
-  context.system.actorSelection("/user/keys") ! Broadcast(broadcast)
-
-  def complete = responses.reduce(_ ++ _)
-
-  def receiver = {
-    case Response(_, value) =>
-      responses += value.asInstanceOf[Iterable[String]]
-      if (responses.size == keyNodes) {
-        payload.deliver(complete)
-        context stop self
-      }
-  }
-
-}
-
-class AggregateRandomKey(payload: Payload) extends AggregateKeys(payload: Payload) {
-  // This is slower than it needs to be,
-  // it should only wait for one response.
-  override def complete = {
-    val keys = super.complete.toSeq
-    if (keys.size > 0) Seq(keys(Random.nextInt(keys.size))) else Seq()
-  }
-}
-
 class ClientNode extends Node {
 
   val buffer = new StringBuilder()
   var client: Option[ActorRef] = None
 
-  def run = {
-    case "mset"      => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
-    case "msetnx"    => aggregate
-    case "mget"      => aggregate
-    case "del"       => aggregate
-    case "keys"      => aggregate
-    case "randomkey" => aggregate
+  def aggregate(props: Props): Unit = {
+    context.actorOf(props, s"aggregate-${randKey}") ! payload
   }
 
+  def run = {
+    case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
+    case "msetnx"      => aggregate(Props[AggregateMSETNX])
+    case "mget"        => aggregate(Props[AggregateMGET])
+    case "del"         => aggregate(Props[AggregateDEL])
+    case "keys"        => aggregate(Props[AggregateKEYS])
+    //case "scan"        => aggregate(Props[AggregateSCAN]
+    case "randomkey"   => aggregate(Props[AggregateRANDOMKEY])
+    case "sdiff"       => aggregate(Props[AggregateSDIFF])
+    case "sinter"      => aggregate(Props[AggregateSINTER])
+    case "sunion"      => aggregate(Props[AggregateSUNION])
+    case "sdiffstore"  => aggregate(Props[AggregateSDIFFSTORE])
+    case "sinterstore" => aggregate(Props[AggregateSINTERSTORE])
+    case "sunionstore" => aggregate(Props[AggregateSUNIONSTORE])
+  }
+
+  // TODO: read/write redis protocol.
   override def receiver = ({
     case Tcp.Received(data) =>
       val received = data.utf8String
@@ -645,6 +560,98 @@ class ClientNode extends Node {
   }
   }: Receive) orElse super.receiver
 
+}
+
+abstract class Aggregate[T](val command: String) extends BaseActor {
+
+  implicit var payload = Payload()
+  val responses = MutableMap[String, T]()
+  def complete: Any
+  def keys = payload.args
+  def begin = keys.foreach {key => route(Seq(command, key), Some(self))}
+  lazy val ordered = keys.map((key: String) => responses(key))
+
+  def receiver = {
+    case p: Payload => payload = p; begin
+    case Response(key, value) =>
+      val keyOrIndex = if (key == "") (responses.size + 1).toString else key
+      responses(keyOrIndex) = value.asInstanceOf[T]
+      if (responses.size == keys.size) {
+        payload.deliver(complete)
+        context stop self
+      }
+  }
+
+}
+
+abstract class AggregateSet(reducer: (Set[String], Set[String]) => Set[String])
+  extends Aggregate[Set[String]]("smembers") {
+
+  override def complete: Any = ordered.reduce(reducer)
+
+}
+
+class AggregateSetStore(reducer: (Set[String], Set[String]) => Set[String]) extends AggregateSet(reducer) {
+  override def complete = {
+    val result = super.complete.asInstanceOf[Set[String]].toSeq
+    route(Seq("_sstore", payload.key) ++ result, destination = payload.destination)
+    ()
+  }
+}
+
+class AggregateSDIFF extends AggregateSet(_ &~ _)
+
+class AggregateSINTER extends AggregateSet(_ & _)
+
+class AggregateSUNION extends AggregateSet(_ | _)
+
+class AggregateSDIFFSTORE extends AggregateSetStore(_ &~ _)
+
+class AggregateSINTERSTORE extends AggregateSetStore(_ & _)
+
+class AggregateSUNIONTORE extends AggregateSetStore(_ | _)
+
+class AggregateMGET extends Aggregate[String]("get") {
+  override def complete = ordered
+}
+
+abstract class AggregateBool(command: String) extends Aggregate[Boolean](command) {
+  def filtered = responses.values.filter(_ == true)
+}
+
+class AggregateDEL extends AggregateBool("_del") {
+  override def complete = filtered.size
+}
+
+class AggregateMSETNX extends AggregateBool("exists") {
+  // This is hugely slow since it needs to run exists once per key.
+  // What we need is a way to initially group the keys by hash value,
+  // then send each group as one payload. This would form a strategy for
+  // exists handling multiple keys in general, in which case it would
+  // become a ClientNode command.
+  override def keys = payload.argPairs.map(_._1)
+  override def complete = {
+    val x = filtered.isEmpty
+    if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
+    x
+  }
+}
+
+class AggregateKEYS extends Aggregate[Iterable[String]]("_keys") {
+  val keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
+  lazy val broadcast = Broadcast(Payload(command +: payload.args, Some(self)))
+  override def keys = (1 to keyNodes).map(_.toString)
+  override def begin = context.system.actorSelection("/user/keys") ! broadcast
+  override def complete = responses.values.reduce(_ ++ _)
+}
+
+class AggregateRANDOMKEY extends AggregateKEYS {
+  // This is slower than it needs to be,
+  // it should only wait for one response.
+  override def complete = {
+    val keys = super.complete.toSeq
+    if (keys.size > 0) Seq(keys(Random.nextInt(keys.size))) else Seq()
+  }
 }
 
 class Server(host: String, port: Int) extends BaseActor {
