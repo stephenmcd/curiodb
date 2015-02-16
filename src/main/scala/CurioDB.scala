@@ -122,7 +122,7 @@ object Commands {
       "exists"       -> Spec(),
       "expire"       -> Spec(args = 1),
       "expireat"     -> Spec(args = 1),
-      "persist"      -> Spec(args = 1),
+      "persist"      -> Spec(default = zero),
       "pexpire"      -> Spec(args = 1),
       "pexpireat"    -> Spec(args = 1),
       "pttl"         -> Spec(),
@@ -159,11 +159,10 @@ object Commands {
 
   def nodeType(command: String) = get(command)._1
 
-  def argsInRange(command: String, args: Seq[String]) =
-    get(command)._2(command).args match {
-      case fixed: Int => args.size == fixed
-      case range: Range => range.contains(args.size)
-    }
+  def argsInRange(command: String, args: Seq[String]) = get(command)._2(command).args match {
+    case fixed: Int => args.size == fixed
+    case range: Range => range.contains(args.size)
+  }
 
 }
 
@@ -289,7 +288,7 @@ abstract class Node extends LoggingActor with PayloadProcessing {
       payload = p
       payload.deliver(Try(run(payload.command)) match {
         case Success(response) => response
-        case Failure(e) => log.error(s"$e"); "error"
+        case Failure(e) => log.error(e, s"Error running: $payload"); "error"
       })
   }
 
@@ -455,7 +454,7 @@ class NodeEntry(val node: ActorRef, val nodeType: String, var expiry: Option[(Lo
 class KeyNode extends BaseHashNode[NodeEntry] {
 
   def expire(when: Long): Boolean = {
-    val x = run("persist") != -2
+    val x = run("ttl") != -2
     if (x) {
       val expires = ((when - System.currentTimeMillis).toInt milliseconds)
       val cancellable = context.system.scheduler.scheduleOnce(expires) {
@@ -500,11 +499,11 @@ class KeyNode extends BaseHashNode[NodeEntry] {
         "OK"
       } else "error"
     case "persist"    =>
-      val x = exists(payload.key)
-      if (x) {
-        val expiry = value(args(0)).expiry.get
-        if (expiry != None) expiry._2.cancel()
-      }; x
+      val entry = value(payload.key)
+      entry.expiry match {
+        case None => 0
+        case Some((_, cancellable)) => cancellable.cancel(); entry.expiry = None; 1
+      }
   }: Run) orElse super.run
 
   override def receiver = ({

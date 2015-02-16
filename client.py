@@ -23,8 +23,6 @@ while True:
             break
     else:
         args = sys.argv[1:]
-        if args == ["lol"]:
-            args = ["msetnx"] + map(str, range(30000))
         sock.send("%s\n" % " ".join(args))
         print sock.recv(1024)
         break
