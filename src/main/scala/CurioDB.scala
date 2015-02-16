@@ -116,10 +116,10 @@ object Commands {
     ),
 
     "keys" -> Map(
-      "_del"         -> Spec(default = nil),
+      "_del"         -> Spec(default = nil, keyed = false),
       "_keys"        -> Spec(args = 0 to 1, keyed = false),
       "_randomkey"   -> Spec(keyed = false),
-      "exists"       -> Spec(),
+      "exists"       -> Spec(args = 1 to many, keyed = false),
       "expire"       -> Spec(args = 1),
       "expireat"     -> Spec(args = 1),
       "persist"      -> Spec(default = zero),
@@ -473,10 +473,10 @@ class KeyNode extends BaseHashNode[NodeEntry] {
   }
 
   override def run = ({
-    case "_del"       => val x = exists(payload.key); value -= payload.key; x
+    case "_del"       => val x = args.map(exists); value --= args; x
     case "_keys"      => pattern(value.keys, args(0))
     case "_randomkey" => Rand.item(value.keys)
-    case "exists"     => exists(payload.key)
+    case "exists"     => args.map(exists)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
     case "expire"     => expire(System.currentTimeMillis + (args(0).toInt * 1000))
@@ -584,7 +584,7 @@ abstract class Aggregate[T](val command: String) extends LoggingActor with Paylo
   var responses = MutableMap[String, T]()
   lazy val ordered = args.map((key: String) => responses(key))
 
-  def complete: Any
+  def complete: Any = ordered
 
   def begin = args.foreach {key => route(Seq(command, key), Some(self))}
 
@@ -600,6 +600,8 @@ abstract class Aggregate[T](val command: String) extends LoggingActor with Paylo
   }
 
 }
+
+class AggregateMGet extends Aggregate[String]("get")
 
 abstract class AggregateSet(reducer: (Set[String], Set[String]) => Set[String])
   extends Aggregate[Set[String]]("smembers") {
@@ -625,35 +627,10 @@ class AggregateSInterStore extends AggregateSetStore(_ & _)
 
 class AggregateSUnionStore extends AggregateSetStore(_ | _)
 
-class AggregateMGet extends Aggregate[String]("get") {
-  override def complete = ordered
-}
-
-abstract class AggregateBool(command: String) extends Aggregate[Boolean](command) {
-  def filtered = responses.values.filter(_ == true)
-}
-
-class AggregateDel extends AggregateBool("_del") {
-  override def complete = filtered.size
-}
-
-class AggregateMSetNX extends AggregateBool("exists") {
-  // This is hugely slow since it needs to run exists once per key.
-  // What we need is a way to initially group the keys by hash value,
-  // then send each group as one payload. This would form a strategy for
-  // exists handling multiple keys in general, in which case it would
-  // become a ClientNode command.
-  override def args = payload.argPairs.map(_._1)
-  override def complete = {
-    val x = filtered.isEmpty
-    if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
-    x
-  }
-}
-
 abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
   val keyNodes = context.system.settings.config.getInt("curiodb.keynodes")
-  lazy val broadcast = Broadcast(Payload(command +: payload.args, Some(self)))
+  lazy val broadcast = Broadcast(Payload(command +: broadcastArgs, Some(self)))
+  def broadcastArgs = payload.args
   override def args = (1 to keyNodes).map(_.toString)
   override def begin = context.system.actorSelection("/user/keys") ! broadcast
 }
@@ -668,6 +645,23 @@ class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
 
 class AggregateScan extends AggregateKeys with Scanning {
   override def complete = scan(super.complete)
+}
+
+abstract class AggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {
+  def trues = responses.values.flatten.filter(_ == true)
+}
+
+class AggregateDel extends AggregateBool("_del") {
+  override def complete = trues.size
+}
+
+class AggregateMSetNX extends AggregateBool("exists") {
+  override def broadcastArgs = payload.argPairs.map(_._1)
+  override def complete = {
+    val x = trues.isEmpty
+    if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
+    x
+  }
 }
 
 class Server(host: String, port: Int) extends LoggingActor {
