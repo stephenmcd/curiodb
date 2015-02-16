@@ -117,7 +117,7 @@ object Commands {
 
     "keys" -> Map(
       "_del"         -> Spec(default = nil),
-      "_keys"        -> Spec(args = 0 to 1),
+      "_keys"        -> Spec(args = 0 to 1, keyed = false),
       "_randomkey"   -> Spec(keyed = false),
       "exists"       -> Spec(),
       "expire"       -> Spec(args = 1),
@@ -474,7 +474,7 @@ class KeyNode extends BaseHashNode[NodeEntry] {
 
   override def run = ({
     case "_del"       => val x = exists(payload.key); value -= payload.key; x
-    case "_keys"      => if (payload.key != "") pattern(value.keys, payload.key) else value.keys
+    case "_keys"      => pattern(value.keys, args(0))
     case "_randomkey" => Rand.item(value.keys)
     case "exists"     => exists(payload.key)
     case "ttl"        => ttl / 1000
@@ -581,7 +581,7 @@ class ClientNode extends Node {
 
 abstract class Aggregate[T](val command: String) extends LoggingActor with PayloadProcessing {
 
-  val responses = MutableMap[String, T]()
+  var responses = MutableMap[String, T]()
   lazy val ordered = args.map((key: String) => responses(key))
 
   def complete: Any
