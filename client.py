@@ -7,7 +7,7 @@ import time
 
 host = "localhost"
 port = 9999
-timeout = 30
+timeout = 60
 now = time.time()
 
 
