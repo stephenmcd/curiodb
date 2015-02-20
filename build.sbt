@@ -15,3 +15,5 @@ val shellScript = Option(Seq("#!/usr/bin/env sh", """exec java -jar "$0" "$@""""
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript = shellScript)
 
 assemblyJarName in assembly := s"${name.value}-${version.value}"
+
+fork := true
