@@ -1,17 +1,20 @@
 package curiodb
 
 import akka.actor._
+import akka.cluster.Cluster
 import akka.event.LoggingReceive
 import akka.io.{IO, Tcp}
 import akka.persistence._
-import akka.routing.{Broadcast, ConsistentHashingGroup}
+import akka.routing.{Broadcast, FromConfig}
 import akka.routing.ConsistentHashingRouter.ConsistentHashable
 import akka.util.ByteString
+import com.typesafe.config.ConfigFactory
+import java.net.{InetSocketAddress, URI}
+import scala.collection.JavaConversions._
 import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHashSet}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure, Random, Try}
-import java.net.InetSocketAddress
 
 case class Spec(
   val args: Any = 0,
@@ -528,10 +531,11 @@ class ClientNode extends Node[Null] {
   var value = null
   val buffer = new StringBuilder()
   var client: Option[ActorRef] = None
+  var aggregateId = 0
 
   def aggregate(props: Props): Unit = {
-    val rand = Random.alphanumeric.take(5).mkString
-    context.actorOf(props, s"aggregate-${payload.command}-${rand}") ! payload
+    aggregateId += 1
+    context.actorOf(props, s"aggregate-${payload.command}-${aggregateId}") ! payload
   }
 
   def run = {
@@ -674,22 +678,41 @@ class AggregateMSetNX extends AggregateBool("exists") {
   }
 }
 
-class Server(host: String, port: Int) extends Actor {
-  import context.system
-  IO(Tcp) ! Tcp.Bind(self, new InetSocketAddress(host, port))
+class Server(listen: URI) extends Actor {
+  IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
   def receive = LoggingReceive {
     case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
   }
 }
 
-object CurioDB extends App {
-  val system   = ActorSystem()
-  val host     = system.settings.config.getString("curiodb.host")
-  val port     = system.settings.config.getInt("curiodb.port")
-  val keyNodes = system.settings.config.getInt("curiodb.keynodes")
-  system.actorOf(ConsistentHashingGroup((1 to keyNodes).map {i =>
-    val path = s"keynode-$i"; system.actorOf(Props[KeyNode], path); "/user/" + path
-  }).props(), name = "keys")
-  system.actorOf(Props(new Server(host, port)), "server")
-  system.awaitTermination()
+object CurioDB {
+  def main(args: Array[String]): Unit = {
+
+    val sysName   = "curiodb"
+    val config    = ConfigFactory.load()
+    val listen    = new URI(config.getString("curiodb.listen"))
+    val node      = if (args.isEmpty) config.getString("curiodb.node") else args(0)
+    val nodes     = config.getObject("curiodb.nodes").map(node => (node._1 -> new URI(node._2.unwrapped.toString)))
+    val keyNodes  = nodes.size * config.getInt("akka.actor.deployment./keys.cluster.max-nr-of-instances-per-node")
+    val seedNodes = nodes.values.map(u => s""" "akka.${u.getScheme}://${sysName}@${u.getHost}:${u.getPort}" """)
+
+    val system = ActorSystem(sysName, ConfigFactory.parseString(s"""
+      curiodb.keynodes = ${keyNodes}
+      curiodb.node = ${node}
+      akka.cluster.seed-nodes = [${seedNodes.mkString(",")}]
+      akka.cluster.min-nr-of-members = ${nodes.size}
+      akka.remote.netty.tcp.hostname = "${nodes(node).getHost}"
+      akka.remote.netty.tcp.port = ${nodes(node).getPort}
+      akka.actor.deployment./keys.nr-of-instances = ${keyNodes}
+    """).withFallback(config))
+
+    Cluster(system).registerOnMemberUp {
+      println("All nodes are up!")
+      system.actorOf(Props[KeyNode].withRouter(FromConfig()), name = "keys")
+    }
+
+    system.actorOf(Props(new Server(listen)), "server")
+    system.awaitTermination()
+
+  }
 }

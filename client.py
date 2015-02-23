@@ -23,6 +23,8 @@ while True:
             break
     else:
         args = sys.argv[1:]
+        if args[0].endswith("many"):
+            args = [args[0].replace("many", "")] + map(str, range(int(args[1])))
         sock.send("%s\n" % " ".join(args))
         print sock.recv(1024)
         break

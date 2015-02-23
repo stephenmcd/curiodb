@@ -7,7 +7,8 @@ val akkaV = "2.3.9"
 
 libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaV,
-  "com.typesafe.akka" %% "akka-persistence-experimental" % akkaV
+  "com.typesafe.akka" %% "akka-persistence-experimental" % akkaV,
+  "com.typesafe.akka" %% "akka-cluster" % akkaV
 )
 
 val shellScript = Option(Seq("#!/usr/bin/env sh", """exec java -jar "$0" "$@""""))
