@@ -22,13 +22,15 @@ case class Spec(
   val keyed: Boolean = true,
   val writes: Boolean = false)
 
+case class Error(message: String, prefix: String = "ERR")
+
 object Commands {
 
   val many = Int.MaxValue - 1
   val evens = 2 to many by 2
 
-  val error  = (_: Seq[String]) => "error"
-  val nil    = (_: Seq[String]) => "nil"
+  val error  = (_: Seq[String]) => Error("no such key")
+  val nil    = (_: Seq[String]) => null
   val ok     = (_: Seq[String]) => "OK"
   val zero   = (_: Seq[String]) => 0
   val neg1   = (_: Seq[String]) => -1
@@ -174,7 +176,7 @@ object Commands {
 case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) {
   val command = if (input.size > 0) input(0).toString.toLowerCase else ""
   val nodeType = if (command != "") Commands.nodeType(command) else ""
-  val key = if (input.size > 1 && Commands.keyed(command)) input(1).toString else ""
+  val key = if (nodeType != "" && input.size > 1 && Commands.keyed(command)) input(1).toString else ""
   val args = input.slice(if (key == "") 1 else 2, input.size).map(_.toString)
   lazy val argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
 }
@@ -264,7 +266,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
       payload = p
       deliver(Try(run(payload.command)) match {
         case Success(response) => if (Commands.writes(payload.command)) saveSnapshot(value); response
-        case Failure(e) => log.error(e, s"Error running: $payload"); "error"
+        case Failure(e) => log.error(e, s"Error running: $payload"); "unknown error"
       })
   }
 
@@ -298,16 +300,16 @@ class StringNode extends Node[String] {
     case "getrange"    => value.slice(args(0).toInt, args(1).toInt)
     case "setrange"    => value.patch(args(0).toInt, args(1), 1)
     case "strlen"      => value.size
-    case "incr"        => value = (valueOrZero.toInt + 1).toString; value
-    case "incrby"      => value = (valueOrZero.toInt + args(0).toInt).toString; value
-    case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
-    case "decr"        => value = (valueOrZero.toInt - 1).toString; value
-    case "decrby"      => value = (valueOrZero.toInt - args(0).toInt).toString; value
+    case "incr"        => value = (valueOrZero.toInt + 1).toString; value.toInt
+    case "incrby"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
+    case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value.toFloat
+    case "decr"        => value = (valueOrZero.toInt - 1).toString; value.toInt
+    case "decrby"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
     case "bitcount"    => value.getBytes.map{_.toInt.toBinaryString.count(_ == "1")}.sum
-    case "bitop"       => "Not implemented"
-    case "bitpos"      => "Not implemented"
-    case "getbit"      => "Not implemented"
-    case "setbit"      => "Not implemented"
+    case "bitop"       => Error("not implemented")
+    case "bitpos"      => Error("not implemented")
+    case "getbit"      => Error("not implemented")
+    case "setbit"      => Error("not implemented")
     case "setex"       => val x = run("set"); expire("expire"); x
     case "psetex"      => val x = run("set"); expire("pexpire"); x
   }
@@ -355,7 +357,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
       blocked += payload
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= payload
-        deliver("nil")
+        deliver(null)
       }; ()
     } else run(payload.command.tail)
   }
@@ -449,8 +451,8 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
     val mustExist   = payload.command == "setnx"
     val default     = Commands.default(payload.command, payload.args)
-    if (invalidType) Some(s"Invalid command ${payload.command} for ${nodeType}")
-    else if ((exists && cantExist) || (!exists && mustExist)) Some(0)
+    if (invalidType) Some(Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE"))
+    else if ((exists && cantExist) || (!exists && mustExist)) Some("0")
     else if (!exists && default != ()) Some(default)
     else None
   }
@@ -487,8 +489,8 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     case "pexpire"    => expire(System.currentTimeMillis + args(0).toInt)
     case "expireat"   => expire(args(0).toLong / 1000)
     case "pexpireat"  => expire(args(0).toLong)
-    case "sort"       => "Not implemented"
-    case "type"       => if (value.contains(payload.key)) value(payload.key).nodeType else "nil"
+    case "sort"       => Error("not implemented")
+    case "type"       => if (value.contains(payload.key)) value(payload.key).nodeType else null
     case "renamenx"   => val x = value.contains(payload.key); if (x) {run("rename")}; x
     case "rename"     =>
       if (payload.key != args(0)) {
@@ -501,7 +503,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
         }
         route(Seq(command, payload.key, args(0)))
         "OK"
-      } else "error"
+      } else Error("source and destination objects are the same")
     case "persist"    =>
       val entry = value(payload.key)
       entry.expiry match {
@@ -512,7 +514,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
 
   override def receiveCommand = ({
     case Unrouted(p) => payload = p; validate match {
-      case Some(error) => deliver(error)
+      case Some(errorOrDefault) => deliver(errorOrDefault)
       case None => node ! payload
     }
   }: Receive) orElse super.receiveCommand
@@ -555,19 +557,32 @@ class ClientNode extends Node[Null] {
   }
 
   def validate = {
-    if (payload.nodeType == "") Some("Unknown command")
-    else if (payload.key == "" && Commands.keyed(payload.command)) Some("No key specified")
-    else if (!Commands.argsInRange(payload.command, payload.args)) Some("Invalid number of args")
+    if (payload.nodeType == "")
+      Some(Error(s"unknown command '${payload.command}'"))
+    else if ((payload.key == "" && Commands.keyed(payload.command)) ||
+             !Commands.argsInRange(payload.command, payload.args))
+      Some(Error("wrong number of arguments for '${payload.command}' command"))
     else None
   }
 
-  // TODO: read/write redis protocol.
+  def fromResp(received: StringBuilder) =
+    received.stripLineEnd.split("\r\n").filter {x: String => "*$".indexOf(x.head) == -1}
+
+  def toResp(response: Any): String = response match {
+    case x: Iterable[Any] => s"*${x.size}\r\n${x.map(toResp).mkString}\r\n"
+    case x: Boolean => toResp(if (x) 1 else 0)
+    case x: Int => s":$x\r\n"
+    case x: String => s"+$x\r\n"
+    case Error(message, prefix) => s"-$prefix $message\r\n"
+    case null => "$-1\r\n"
+  }
+
   override def receiveCommand = ({
     case Tcp.Received(data) =>
       val received = data.utf8String
       buffer.append(received)
-      if (received.endsWith("\n")) {
-        payload = Payload(buffer.stripLineEnd.split(' '), destination = Some(self))
+      if (received.endsWith("\r\n")) {
+        payload = Payload(fromResp(buffer), destination = Some(self))
         buffer.clear()
         client = Some(sender())
         validate match {
@@ -578,13 +593,9 @@ class ClientNode extends Node[Null] {
         }
       }
     case Tcp.PeerClosed => context stop self
-    case Response(_, response) =>
-      val message = response match {
-        case x: Iterable[Any] => x.mkString("\n")
-        case x: Boolean => if (x) "1" else "0"
-        case x => x.toString
-      }
-      client.foreach {client => client ! Tcp.Write(ByteString(message + "\n"))}
+    case Response(_, response) => client.foreach {client =>
+      client ! Tcp.Write(ByteString(toResp(response)))
+    }
   }: Receive) orElse super.receiveCommand
 
 }
