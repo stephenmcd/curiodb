@@ -132,7 +132,6 @@ object Commands {
       "pttl"         -> Spec(default = neg2),
       "rename"       -> Spec(args = 1, default = error),
       "renamenx"     -> Spec(args = 1, default = error),
-      "sort"         -> Spec(args = 1 to many, default = seq),
       "ttl"          -> Spec(default = neg2),
       "type"         -> Spec()
     ),
@@ -232,12 +231,18 @@ trait PayloadProcessing extends Actor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
+  def slice[T](value: Seq[T]): Seq[T] = {
+    val to = args(1).toInt
+    value.slice(args(0).toInt, if (to < 0) value.size + 1 + to else to + 1)
+  }
+
 }
 
 abstract class Node[T] extends PersistentActor with PayloadProcessing with ActorLogging {
 
   var value: T
   var lastSnapshot: Option[SnapshotMetadata] = None
+  val persistence = context.system.settings.config.getBoolean("curiodb.persistence")
 
   type Run = PartialFunction[String, Any]
 
@@ -245,12 +250,15 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   def persistenceId = self.path.name
 
+  def save = if (persistence) saveSnapshot(value)
+
   def deleteOldSnapshots(stopping: Boolean = false) =
-    lastSnapshot.foreach {meta =>
-      val criteria = if (stopping) SnapshotSelectionCriteria()
-      else SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
-      deleteSnapshots(criteria)
-    }
+    if (persistence)
+      lastSnapshot.foreach {meta =>
+        val criteria = if (stopping) SnapshotSelectionCriteria()
+        else SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
+        deleteSnapshots(criteria)
+      }
 
   override def receiveRecover: Receive = {
     case SnapshotOffer(meta, snapshot) =>
@@ -265,7 +273,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     case p: Payload =>
       payload = p
       deliver(Try(run(payload.command)) match {
-        case Success(response) => if (Commands.writes(payload.command)) saveSnapshot(value); response
+        case Success(response) => if (Commands.writes(payload.command)) save; response
         case Failure(e) => log.error(e, s"Error running: $payload"); "unknown error"
       })
   }
@@ -297,12 +305,12 @@ class StringNode extends Node[String] {
     case "setnx"       => run("set"); true
     case "getset"      => val x = value; value = args(0); x
     case "append"      => value += args(0); value
-    case "getrange"    => value.slice(args(0).toInt, args(1).toInt)
+    case "getrange"    => slice(value).mkString
     case "setrange"    => value.patch(args(0).toInt, args(1), 1)
     case "strlen"      => value.size
     case "incr"        => value = (valueOrZero.toInt + 1).toString; value.toInt
     case "incrby"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
-    case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value.toFloat
+    case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
     case "decr"        => value = (valueOrZero.toInt - 1).toString; value.toInt
     case "decrby"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
     case "bitcount"    => value.getBytes.map{_.toInt.toBinaryString.count(_ == "1")}.sum
@@ -327,15 +335,15 @@ class HashNode extends Node[MutableMap[String, String]] {
     case "hkeys"        => value.keys
     case "hexists"      => value.contains(args(0))
     case "hscan"        => scan(value.keys)
-    case "hget"         => value.get(args(0))
-    case "hsetnx"       => if (value.contains(args(0))) run("hset") else false
+    case "hget"         => value.getOrElse(args(0), null)
+    case "hsetnx"       => if (!value.contains(args(0))) run("hset") else false
     case "hgetall"      => value.map(x => Seq(x._1, x._2)).flatten
     case "hvals"        => value.values
     case "hdel"         => val x = run("hexists"); value -= args(0); x
     case "hlen"         => value.size
     case "hmget"        => args.map(value.get(_))
     case "hmset"        => argPairs.foreach {args => value(args._1) = args._2}; "OK"
-    case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt)
+    case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
     case "hincrbyfloat" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
     case "hset"         => val x = !value.contains(args(0)); set(args(1)); x
   }
@@ -346,11 +354,6 @@ class ListNode extends Node[ArrayBuffer[String]] {
 
   var value = ArrayBuffer[String]()
   var blocked = LinkedHashSet[Payload]()
-
-  def slice = {
-    val to = args(1).toInt
-    value.slice(args(0).toInt, if (to < 0) value.size + 1 + to else to + 1)
-  }
 
   def block: Any = {
     if (value.isEmpty) {
@@ -380,10 +383,10 @@ class ListNode extends Node[ArrayBuffer[String]] {
     case "lpop"       => val x = value(0); value -= x; x
     case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
     case "lset"       => value(args(0).toInt) = args(1); deliver("OK")
-    case "lindex"     => value(args(0).toInt)
+    case "lindex"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
     case "lrem"       => value.remove(args(0).toInt)
-    case "lrange"     => slice
-    case "ltrim"      => value = slice; "OK"
+    case "lrange"     => slice(value)
+    case "ltrim"      => value = slice(value).asInstanceOf[ArrayBuffer[String]]; "OK"
     case "llen"       => value.size
     case "blpop"      => block
     case "brpop"      => block
@@ -426,6 +429,7 @@ class NodeEntry(
 class KeyNode extends Node[MutableMap[String, NodeEntry]] {
 
   var value = MutableMap[String, NodeEntry]()
+  val wrongType = Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
 
   def expire(when: Long): Int = {
     run("persist")
@@ -451,7 +455,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
     val mustExist   = payload.command == "setnx"
     val default     = Commands.default(payload.command, payload.args)
-    if (invalidType) Some(Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE"))
+    if (invalidType) Some(wrongType)
     else if ((exists && cantExist) || (!exists && mustExist)) Some("0")
     else if (!exists && default != ()) Some(default)
     else None
@@ -470,7 +474,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
       case "list"   => Props[ListNode]
       case "set"    => Props[SetNode]
     }, key))
-    if (!recovery) saveSnapshot(value)
+    if (!recovery) save
     value(key).node
   }
 
@@ -489,7 +493,6 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     case "pexpire"    => expire(System.currentTimeMillis + args(0).toInt)
     case "expireat"   => expire(args(0).toLong / 1000)
     case "pexpireat"  => expire(args(0).toLong)
-    case "sort"       => Error("not implemented")
     case "type"       => if (value.contains(payload.key)) value(payload.key).nodeType else null
     case "renamenx"   => val x = value.contains(payload.key); if (x) {run("rename")}; x
     case "rename"     =>
@@ -544,37 +547,41 @@ class ClientNode extends Node[Null] {
     case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
+    case "dbsize"      => aggregate(Props[AggregateDbSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
     case "scan"        => aggregate(Props[AggregateScan])
     case "randomkey"   => aggregate(Props[AggregateRandomKey])
     case "sdiff"       => aggregate(Props[AggregateSDiff])
-    case "sinter"      => aggregate(Props[AggregateSInterStore])
+    case "sinter"      => aggregate(Props[AggregateSInter])
     case "sunion"      => aggregate(Props[AggregateSUnion])
     case "sdiffstore"  => aggregate(Props[AggregateSDiffStore])
     case "sinterstore" => aggregate(Props[AggregateSInterStore])
     case "sunionstore" => aggregate(Props[AggregateSUnionStore])
+    case "select"      => "OK"
   }
 
   def validate = {
     if (payload.nodeType == "")
       Some(Error(s"unknown command '${payload.command}'"))
-    else if ((payload.key == "" && Commands.keyed(payload.command)) ||
-             !Commands.argsInRange(payload.command, payload.args))
-      Some(Error("wrong number of arguments for '${payload.command}' command"))
+    else if ((payload.key == "" && Commands.keyed(payload.command))
+        || !Commands.argsInRange(payload.command, payload.args))
+      Some(Error(s"wrong number of arguments for '${payload.command}' command"))
     else None
   }
 
   def fromResp(received: StringBuilder) =
-    received.stripLineEnd.split("\r\n").filter {x: String => "*$".indexOf(x.head) == -1}
+    received.stripLineEnd.split("\r\n", -1).filterNot {x: String =>
+      x.size > 1 && "*$".indexOf(x.head) > -1
+    }
 
   def toResp(response: Any): String = response match {
-    case x: Iterable[Any] => s"*${x.size}\r\n${x.map(toResp).mkString}\r\n"
-    case x: Boolean => toResp(if (x) 1 else 0)
-    case x: Int => s":$x\r\n"
-    case x: String => s"+$x\r\n"
-    case Error(message, prefix) => s"-$prefix $message\r\n"
-    case null => "$-1\r\n"
+    case x: Iterable[Any]   => s"*${x.size}\r\n${x.map(toResp).mkString}\r\n"
+    case x: Boolean         => toResp(if (x) 1 else 0)
+    case x: Integer         => s":$x\r\n"
+    case Error(msg, prefix) => s"-$prefix $msg\r\n"
+    case null               => "$-1\r\n"
+    case x                  => s"+$x\r\n"
   }
 
   override def receiveCommand = ({
@@ -617,10 +624,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
-      if (responses.size == keys.size) {
-        deliver(complete)
-        context stop self
-      }
+      if (responses.size == keys.size) {deliver(complete); context stop self}
   }
 
 }
@@ -658,17 +662,21 @@ abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](comma
   override def begin = context.system.actorSelection("/user/keys") ! broadcast
 }
 
-class AggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
-  override def complete = responses.values.reduce(_ ++ _)
+abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
+  def reduced = responses.values.reduce(_ ++ _)
+}
+
+class AggregateKeys extends BaseAggregateKeys {
+  override def complete = reduced
 }
 
 class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
   override def complete = randomItem(responses.values.filter(_ != ""))
 }
 
-class AggregateScan extends AggregateKeys {
+class AggregateScan extends BaseAggregateKeys {
   override def broadcastArgs = Seq("*")
-  override def complete = scan(super.complete)
+  override def complete = scan(reduced)
 }
 
 abstract class AggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {

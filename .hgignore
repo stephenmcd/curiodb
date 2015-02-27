@@ -2,5 +2,3 @@ syntax: glob
 
 .DS_Store
 target/*
-journal/*
-snapshots/*
