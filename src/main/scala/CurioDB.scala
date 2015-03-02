@@ -20,7 +20,8 @@ case class Spec(
   val args: Any = 0,
   val default: (Seq[String] => Any) = (_ => ()),
   val keyed: Boolean = true,
-  val writes: Boolean = false)
+  val writes: Boolean = false,
+  val overwrites: Boolean = false)
 
 case class Error(message: String, prefix: String = "ERR")
 
@@ -44,7 +45,6 @@ object Commands {
   val specs = Map(
 
     "string" -> Map(
-      "_rename"      -> Spec(args = 1, default = nil),
       "append"       -> Spec(args = 1, writes = true),
       "bitcount"     -> Spec(args = 0 to 2, default = zero),
       "bitpos"       -> Spec(args = 1 to 3, default = neg1),
@@ -57,17 +57,18 @@ object Commands {
       "incr"         -> Spec(writes = true),
       "incrby"       -> Spec(args = 1, writes = true),
       "incrbyfloat"  -> Spec(args = 1, writes = true),
-      "psetex"       -> Spec(args = 2, writes = true),
-      "set"          -> Spec(args = 1 to 4, writes = true),
+      "psetex"       -> Spec(args = 2, overwrites = true),
+      "set"          -> Spec(args = 1 to 4, overwrites = true),
       "setbit"       -> Spec(args = 2, writes = true),
-      "setex"        -> Spec(args = 2, writes = true),
+      "setex"        -> Spec(args = 2, overwrites = true),
       "setnx"        -> Spec(args = 1, default = zero, writes = true),
       "setrange"     -> Spec(args = 2, writes = true),
       "strlen"       -> Spec(default = zero)
     ),
 
     "hash" -> Map(
-      "_hrename"     -> Spec(args = 1, default = nil),
+      "_rename"      -> Spec(args = 1),
+      "_hstore"      -> Spec(args = evens, overwrites = true),
       "hdel"         -> Spec(args = 1 to many, default = zeros, writes = true),
       "hexists"      -> Spec(args = 1, default = zero),
       "hget"         -> Spec(args = 1, default = nil),
@@ -85,7 +86,8 @@ object Commands {
     ),
 
     "list" -> Map(
-      "_lrename"     -> Spec(args = 1, default = nil),
+      "_rename"      -> Spec(args = 1),
+      "_lstore"      -> Spec(args = 0 to many, overwrites = true),
       "blpop"        -> Spec(args = 1 to many, default = nil, writes = true),
       "brpop"        -> Spec(args = 1 to many, default = nil, writes = true),
       "brpoplpush"   -> Spec(args = 2, default = nil, writes = true),
@@ -106,8 +108,8 @@ object Commands {
     ),
 
     "set" -> Map(
-      "_srename"     -> Spec(args = 1, default = nil),
-      "_sstore"      -> Spec(args = 1 to many, writes = true),
+      "_rename"      -> Spec(args = 1),
+      "_sstore"      -> Spec(args = 0 to many, overwrites = true),
       "sadd"         -> Spec(args = 1 to many, writes = true),
       "scard"        -> Spec(default = zero),
       "sismember"    -> Spec(args = 1, default = zero),
@@ -161,7 +163,9 @@ object Commands {
 
   def keyed(command: String): Boolean = get(command)._2(command).keyed
 
-  def writes(command: String): Boolean = get(command)._2(command).writes
+  def writes(command: String): Boolean = get(command)._2(command).writes || overwrites(command)
+
+  def overwrites(command: String): Boolean = get(command)._2(command).overwrites
 
   def nodeType(command: String) = get(command)._1
 
@@ -280,9 +284,9 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   override def receive = LoggingReceive(super.receive)
 
-  def rename(to: String, value: Any) = {
+  def rename(fromValue: Any, toCommand: String) = if (payload.key != args(0)) {
     route(Seq("_del", payload.key))
-    route(Seq(to, args(0)) ++ (value match {
+    route(Seq(toCommand, args(0)) ++ (fromValue match {
       case x: Iterable[Any] => x
       case x => Seq(x)
     }))
@@ -299,7 +303,7 @@ class StringNode extends Node[String] {
   def expire(command: String) = route(Seq(command, payload.key, args(1)))
 
   def run = {
-    case "_rename"     => rename("set", value)
+    case "_rename"     => rename(value, "set")
     case "get"         => value
     case "set"         => value = args(0); "OK"
     case "setnx"       => run("set"); true
@@ -331,7 +335,8 @@ class HashNode extends Node[MutableMap[String, String]] {
   def set(arg: Any) = {val x = arg.toString; value(args(0)) = x; x}
 
   override def run = {
-    case "_hrename"     => rename("hmset", run("hgetall"))
+    case "_rename"      => rename(run("hgetall"), "_hstore")
+    case "_hstore"      => value.clear; run("hmset")
     case "hkeys"        => value.keys
     case "hexists"      => value.contains(args(0))
     case "hscan"        => scan(value.keys)
@@ -375,7 +380,8 @@ class ListNode extends Node[ArrayBuffer[String]] {
   }
 
   def run = ({
-    case "_lrename"   => rename("lpush", value)
+    case "_rename"    => rename(value, "_lstore")
+    case "_lstore"    => value.clear; run("lpush")
     case "lpush"      => args ++=: value; deliver(run("llen"))
     case "rpush"      => value ++= args; deliver(run("llen"))
     case "lpushx"     => run("lpush")
@@ -404,7 +410,7 @@ class SetNode extends Node[Set[String]] {
   var value = Set[String]()
 
   def run = {
-    case "_srename"    => rename("sadd", value)
+    case "_rename"     => rename(value, "_sstore")
     case "_sstore"     => value.clear; run("sadd")
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
     case "srem"        => val x = (args.toSet & value).size; value --= args; x
@@ -451,7 +457,8 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
   def validate = {
     val exists      = value.contains(payload.key)
     val nodeType    = if (exists) value(payload.key).nodeType else ""
-    val invalidType = nodeType != "" && payload.nodeType != nodeType && payload.nodeType != "keys"
+    val invalidType = nodeType != "" && payload.nodeType != nodeType &&
+      payload.nodeType != "keys" && !Commands.overwrites(payload.command)
     val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
     val mustExist   = payload.command == "setnx"
     val default     = Commands.default(payload.command, payload.args)
@@ -473,17 +480,18 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
       case "hash"   => Props[HashNode]
       case "list"   => Props[ListNode]
       case "set"    => Props[SetNode]
-    }, key))
+    }, s"$nodeType-$key"))
     if (!recovery) save
     value(key).node
   }
 
+  def delete(key: String) = value.remove(key) match {
+    case Some(entry) => entry.node ! "_del"; true
+    case None => false
+  }
+
   override def run = {
-    case "_del"       =>
-      val x = (payload.key +: args).map(key => value.remove(key) match {
-        case Some(entry) => entry.node ! "_del"; true
-        case None => false
-      }); x
+    case "_del"       => (payload.key +: args).map(delete)
     case "_keys"      => pattern(value.keys, args(0))
     case "_randomkey" => randomItem(value.keys)
     case "exists"     => args.map(value.contains)
@@ -495,18 +503,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     case "pexpireat"  => expire(args(0).toLong)
     case "type"       => if (value.contains(payload.key)) value(payload.key).nodeType else null
     case "renamenx"   => val x = value.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"     =>
-      if (payload.key != args(0)) {
-        route(Seq("_del", args(0)))
-        val command = value(payload.key).nodeType match {
-          case "string" => "_rename"
-          case "hash"   => "_hrename"
-          case "list"   => "_lrename"
-          case "set"    => "_srename"
-        }
-        route(Seq(command, payload.key, args(0)))
-        "OK"
-      } else Error("source and destination objects are the same")
+    case "rename"     => value(payload.key).node ! Payload(Seq("_rename", payload.key, args(0))); "OK"
     case "persist"    =>
       val entry = value(payload.key)
       entry.expiry match {
@@ -518,7 +515,10 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
   override def receiveCommand = ({
     case Unrouted(p) => payload = p; validate match {
       case Some(errorOrDefault) => deliver(errorOrDefault)
-      case None => node ! payload
+      case None =>
+        val overwrite = !value.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
+        if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
+        node ! payload
     }
   }: Receive) orElse super.receiveCommand
 
@@ -547,7 +547,6 @@ class ClientNode extends Node[Null] {
     case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
-    case "dbsize"      => aggregate(Props[AggregateDbSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
     case "scan"        => aggregate(Props[AggregateScan])
