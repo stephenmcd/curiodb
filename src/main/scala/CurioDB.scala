@@ -143,11 +143,13 @@ object Commands {
 
     "client" -> Map(
       "bitop"        -> Spec(args = 3 to many, default = zero),
+      "dbsize"       -> Spec(keyed = false),
       "del"          -> Spec(args = 1 to many, keyed = false),
       "keys"         -> Spec(args = 1, keyed = false),
       "scan"         -> Spec(args = 1 to 3, keyed = false),
       "sdiff"        -> Spec(args = 0 to many, default = seq, keyed = false),
       "sdiffstore"   -> Spec(args = 1 to many, default = zero),
+      "select"       -> Spec(args = 1, keyed = false),
       "sinter"       -> Spec(args = 0 to many, default = seq, keyed = false),
       "sinterstore"  -> Spec(args = 1 to many, default = zero),
       "sunion"       -> Spec(args = 0 to many, default = seq, keyed = false),
@@ -179,7 +181,7 @@ object Commands {
 
 }
 
-case class Payload(input: Seq[Any] = Seq(), destination: Option[ActorRef] = None) {
+case class Payload(input: Seq[Any] = Seq(), db: String = "0", destination: Option[ActorRef] = None) {
   val command = if (input.size > 0) input(0).toString.toLowerCase else ""
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val key = if (nodeType != "" && input.size > 1 && Commands.keyed(command)) input(1).toString else ""
@@ -204,16 +206,16 @@ trait PayloadProcessing extends Actor {
   def route(
       input: Seq[Any] = Seq(),
       destination: Option[ActorRef] = None,
-      payload: Option[Payload] = None) =
-    context.system.actorSelection("/user/keys") ! Unrouted(payload match {
+      clientPayload: Option[Payload] = None) =
+
+    context.system.actorSelection("/user/keys") ! Unrouted(clientPayload match {
       case Some(payload) => payload
-      case None => Payload(input, destination)
+      case None => Payload(input, payload.db, destination)
     })
 
-  def deliver(response: Any) =
-    if (response != ()) payload.destination.foreach {destination =>
-      destination ! Response(payload.key, response)
-    }
+  def deliver(response: Any) = if (response != ()) payload.destination.foreach {destination =>
+    destination ! Response(payload.key, response)
+  }
 
   def randomItem(iterable: Iterable[String]) = {
     if (iterable.isEmpty) "" else iterable.toSeq(Random.nextInt(iterable.size))
@@ -449,31 +451,33 @@ class NodeEntry(
     @transient var expiry: Option[(Long, Cancellable)] = None)
   extends Serializable
 
-class KeyNode extends Node[MutableMap[String, NodeEntry]] {
+class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
 
-  var value = MutableMap[String, NodeEntry]()
+  var value = MutableMap[String, MutableMap[String, NodeEntry]]()
   val wrongType = Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
+
+  def dbFor(name: String) = value.getOrElseUpdate(name, MutableMap[String, NodeEntry]())
+
+  def db = dbFor(payload.db)
 
   def expire(when: Long): Int = {
     run("persist")
     val expires = ((when - System.currentTimeMillis).toInt milliseconds)
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
-      self ! Payload(Seq("_del", payload.key))
+      self ! Payload(Seq("_del", payload.key), db = payload.db)
     }
-    value(payload.key).expiry = Some((when, cancellable))
+    db(payload.key).expiry = Some((when, cancellable))
     1
   }
 
-  def ttl = {
-    value(payload.key).expiry match {
-      case Some((when, _)) => when - System.currentTimeMillis
-      case None => -1
-    }
+  def ttl = db(payload.key).expiry match {
+    case Some((when, _)) => when - System.currentTimeMillis
+    case None => -1
   }
 
   def validate = {
-    val exists      = value.contains(payload.key)
-    val nodeType    = if (exists) value(payload.key).nodeType else ""
+    val exists      = db.contains(payload.key)
+    val nodeType    = if (exists) db(payload.key).nodeType else ""
     val invalidType = nodeType != "" && payload.nodeType != nodeType &&
       payload.nodeType != "keys" && !Commands.overwrites(payload.command)
     val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
@@ -487,51 +491,52 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
 
   def node = {
     if (payload.nodeType == "keys") self
-    else if (value.contains(payload.key)) value(payload.key).node
-    else create(payload.key, payload.nodeType)
+    else db.get(payload.key) match {
+      case Some(entry) => entry.node
+      case None => create(payload.db, payload.key, payload.nodeType)
+    }
   }
 
-  def create(key: String, nodeType: String, recovery: Boolean = false) = {
-    value(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
+  def create(db: String, key: String, nodeType: String, recovery: Boolean = false) = {
+    dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
       case "string" => Props[StringNode]
       case "hash"   => Props[HashNode]
       case "list"   => Props[ListNode]
       case "set"    => Props[SetNode]
-    }, s"$nodeType-$key"))
-    if (!recovery) save
-    value(key).node
+    }, s"$db-$nodeType-$key"))
+    if (!recovery) save; dbFor(db)(key).node
   }
 
-  def delete(key: String) = value.remove(key) match {
+  def delete(key: String) = db.remove(key) match {
     case Some(entry) => entry.node ! "_del"; true
     case None => false
   }
 
   override def run = {
     case "_del"       => (payload.key +: args).map(delete)
-    case "_keys"      => pattern(value.keys, args(0))
-    case "_randomkey" => randomItem(value.keys)
-    case "exists"     => args.map(value.contains)
+    case "_keys"      => pattern(db.keys, args(0))
+    case "_randomkey" => randomItem(db.keys)
+    case "exists"     => args.map(db.contains)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
     case "expire"     => expire(System.currentTimeMillis + (args(0).toInt * 1000))
     case "pexpire"    => expire(System.currentTimeMillis + args(0).toInt)
     case "expireat"   => expire(args(0).toLong / 1000)
     case "pexpireat"  => expire(args(0).toLong)
-    case "type"       => if (value.contains(payload.key)) value(payload.key).nodeType else null
-    case "renamenx"   => val x = value.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"     => value(payload.key).node ! Payload(Seq("_rename", payload.key, args(0))); "OK"
+    case "type"       => if (db.contains(payload.key)) db(payload.key).nodeType else null
+    case "renamenx"   => val x = db.contains(payload.key); if (x) {run("rename")}; x
+    case "rename"     => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); "OK"
     case "persist"    =>
-      val entry = value(payload.key)
+      val entry = db(payload.key)
       entry.expiry match {
         case Some((_, cancellable)) => cancellable.cancel(); entry.expiry = None; 1
         case None => 0
       }
     case "sort"       =>
-      value(payload.key).nodeType match {
+      db(payload.key).nodeType match {
         case "list" | "set" =>
           val sortArgs = Seq("_sort", payload.key) ++ payload.args
-          value(payload.key).node ! Payload(sortArgs, destination = payload.destination)
+          db(payload.key).node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
         case _ => wrongType
       }
   }
@@ -540,7 +545,7 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
     case Unrouted(p) => payload = p; validate match {
       case Some(errorOrDefault) => deliver(errorOrDefault)
       case None =>
-        val overwrite = !value.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
+        val overwrite = !db.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
         if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
         node ! payload
     }
@@ -548,8 +553,8 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
 
   override def receiveRecover: Receive = {
     case SnapshotOffer(_, snapshot) =>
-      snapshot.asInstanceOf[MutableMap[String, NodeEntry]].foreach {item =>
-        create(item._1, item._2.nodeType, recovery = true)
+      snapshot.asInstanceOf[MutableMap[String, MutableMap[String, NodeEntry]]].foreach {db =>
+        db._2.foreach {item => create(db._1, item._1, item._2.nodeType, recovery = true)}
       }
   }
 
@@ -561,6 +566,7 @@ class ClientNode extends Node[Null] {
   val buffer = new StringBuilder()
   var client: Option[ActorRef] = None
   var aggregateId = 0
+  var db = payload.db
 
   def aggregate(props: Props): Unit = {
     aggregateId += 1
@@ -571,6 +577,7 @@ class ClientNode extends Node[Null] {
     case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
+    case "dbsize"      => aggregate(Props[AggregateDbSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
     case "scan"        => aggregate(Props[AggregateScan])
@@ -581,7 +588,7 @@ class ClientNode extends Node[Null] {
     case "sdiffstore"  => aggregate(Props[AggregateSDiffStore])
     case "sinterstore" => aggregate(Props[AggregateSInterStore])
     case "sunionstore" => aggregate(Props[AggregateSUnionStore])
-    case "select"      => "OK"
+    case "select"      => db = args(0); "OK"
   }
 
   def validate = {
@@ -612,14 +619,14 @@ class ClientNode extends Node[Null] {
       val received = data.utf8String
       buffer.append(received)
       if (received.endsWith("\r\n")) {
-        payload = Payload(fromResp(buffer), destination = Some(self))
+        payload = Payload(fromResp(buffer), db = db, destination = Some(self))
         buffer.clear()
         client = Some(sender())
         validate match {
           case Some(error) => deliver(error)
           case None =>
             if (payload.nodeType == "client") self ! payload
-            else route(payload = Option(payload))
+            else route(clientPayload = Option(payload))
         }
       }
     case Tcp.PeerClosed => context stop self
@@ -640,7 +647,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
 
   def complete: Any = ordered
 
-  def begin = keys.foreach {key => route(Seq(command, key), Some(self))}
+  def begin = keys.foreach {key => route(Seq(command, key), destination = Some(self))}
 
   def receive = LoggingReceive {
     case p: Payload => payload = p; begin
@@ -679,7 +686,7 @@ class AggregateSInterStore extends AggregateSetStore(_ & _)
 class AggregateSUnionStore extends AggregateSetStore(_ | _)
 
 abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
-  lazy val broadcast = Broadcast(Payload(command +: broadcastArgs, Some(self)))
+  lazy val broadcast = Broadcast(Payload(command +: broadcastArgs, db = payload.db, destination = Some(self)))
   def broadcastArgs = payload.args
   override def keys = (1 to context.system.settings.config.getInt("curiodb.keynodes")).map(_.toString)
   override def begin = context.system.actorSelection("/user/keys") ! broadcast
@@ -702,6 +709,11 @@ class AggregateScan extends BaseAggregateKeys {
   override def complete = scan(reduced)
 }
 
+class AggregateDbSize extends BaseAggregateKeys {
+  override def broadcastArgs = Seq("*")
+  override def complete = reduced.size
+}
+
 abstract class AggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {
   def trues = responses.values.flatten.filter(_ == true)
 }
@@ -714,9 +726,8 @@ class AggregateDel extends AggregateBool("_del") {
 class AggregateMSetNX extends AggregateBool("exists") {
   override def keys = payload.argPairs.map(_._1)
   override def complete = {
-    val x = trues.isEmpty
-    if (x) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
-    x
+    if (trues.isEmpty) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
+    trues.isEmpty
   }
 }
 
