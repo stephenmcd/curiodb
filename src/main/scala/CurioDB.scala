@@ -88,6 +88,7 @@ object Commands {
     "list" -> Map(
       "_rename"      -> Spec(args = 1),
       "_lstore"      -> Spec(args = 0 to many, overwrites = true),
+      "_sort"        -> Spec(args = 0 to many),
       "blpop"        -> Spec(args = 1 to many, default = nil, writes = true),
       "brpop"        -> Spec(args = 1 to many, default = nil, writes = true),
       "brpoplpush"   -> Spec(args = 2, default = nil, writes = true),
@@ -110,6 +111,7 @@ object Commands {
     "set" -> Map(
       "_rename"      -> Spec(args = 1),
       "_sstore"      -> Spec(args = 0 to many, overwrites = true),
+      "_sort"        -> Spec(args = 0 to many),
       "sadd"         -> Spec(args = 1 to many, writes = true),
       "scard"        -> Spec(default = zero),
       "sismember"    -> Spec(args = 1, default = zero),
@@ -134,6 +136,7 @@ object Commands {
       "pttl"         -> Spec(default = neg2),
       "rename"       -> Spec(args = 1, default = error),
       "renamenx"     -> Spec(args = 1, default = error),
+      "sort"         -> Spec(args = 0 to many, default = seq),
       "ttl"          -> Spec(default = neg2),
       "type"         -> Spec()
     ),
@@ -292,6 +295,18 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     }))
   }
 
+  def sort(values: Iterable[String]): Any = {
+    // TODO: BY/GET support.
+    val upper = args.map(_.toUpperCase)
+    var sorted = if (upper.contains("ALPHA")) values.toSeq.sorted else values.toSeq.sortBy(_.toFloat)
+    if (upper.contains("DESC")) sorted = sorted.reverse
+    val limit = upper.indexOf("LIMIT")
+    if (limit > -1) sorted = sorted.slice(args(limit + 1).toInt, args(limit + 2).toInt)
+    val store = upper.indexOf("STORE")
+    if (store > -1) {route(Seq("_lstore", args(store + 1)) ++ sorted); sorted.size}
+    else sorted
+  }
+
 }
 
 class StringNode extends Node[String] {
@@ -382,6 +397,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
   def run = ({
     case "_rename"    => rename(value, "_lstore")
     case "_lstore"    => value.clear; run("lpush")
+    case "_sort"      => sort(value)
     case "lpush"      => args ++=: value; deliver(run("llen"))
     case "rpush"      => value ++= args; deliver(run("llen"))
     case "lpushx"     => run("lpush")
@@ -412,6 +428,7 @@ class SetNode extends Node[Set[String]] {
   def run = {
     case "_rename"     => rename(value, "_sstore")
     case "_sstore"     => value.clear; run("sadd")
+    case "_sort"       => sort(value)
     case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
     case "srem"        => val x = (args.toSet & value).size; value --= args; x
     case "scard"       => value.size
@@ -509,6 +526,13 @@ class KeyNode extends Node[MutableMap[String, NodeEntry]] {
       entry.expiry match {
         case Some((_, cancellable)) => cancellable.cancel(); entry.expiry = None; 1
         case None => 0
+      }
+    case "sort"       =>
+      value(payload.key).nodeType match {
+        case "list" | "set" =>
+          val sortArgs = Seq("_sort", payload.key) ++ payload.args
+          value(payload.key).node ! Payload(sortArgs, destination = payload.destination)
+        case _ => wrongType
       }
   }
 
