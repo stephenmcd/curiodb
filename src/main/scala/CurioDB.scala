@@ -567,6 +567,7 @@ class ClientNode extends Node[Null] {
   var client: Option[ActorRef] = None
   var aggregateId = 0
   var db = payload.db
+  val end = "\r\n"
 
   def aggregate(props: Props): Unit = {
     aggregateId += 1
@@ -600,27 +601,49 @@ class ClientNode extends Node[Null] {
     else None
   }
 
-  def fromResp(received: StringBuilder) =
-    received.stripLineEnd.split("\r\n", -1).filterNot {x: String =>
-      x.size > 1 && "*$".indexOf(x.head) > -1
+  def readInput(received: String) = {
+
+    buffer.append(received)
+    var pos = 0
+
+    def next(length: Int = 0) = {
+      val to = if (length <= 0) buffer.indexOf(end, pos) else pos + length
+      val part = buffer.slice(pos, to)
+      if (part.size != to - pos) throw new Exception()
+      pos = to + end.size; part.stripLineEnd
     }
 
-  def toResp(response: Any): String = response match {
-    case x: Iterable[Any]   => s"*${x.size}\r\n${x.map(toResp).mkString}\r\n"
-    case x: Boolean         => toResp(if (x) 1 else 0)
-    case x: Integer         => s":$x\r\n"
-    case Error(msg, prefix) => s"-$prefix $msg\r\n"
-    case null               => "$-1\r\n"
-    case x                  => s"+$x\r\n"
+    def parts: Seq[String] = {
+      val part = next()
+      part.head match {
+        case '-'|'+'|':' => Seq(part.tail)
+        case '$'         => Seq(next(part.tail.toInt))
+        case '*'         => (1 to part.tail.toInt).map(_ => parts.head)
+        case _           => part.split(" ")
+      }
+    }
+
+    Try(parts) match {
+      case Success(output) => buffer.clear; output
+      case Failure(_) => Seq[String]()
+    }
+
+  }
+
+  def writeOutput(response: Any): String = response match {
+    case x: Iterable[Any]   => s"*${x.size}${end}${x.map(writeOutput).mkString}"
+    case x: Boolean         => writeOutput(if (x) 1 else 0)
+    case x: Integer         => s":$x$end"
+    case Error(msg, prefix) => s"-$prefix $msg$end"
+    case null               => s"$$-1$end"
+    case x                  => s"$$${x.toString.size}$end$x$end"
   }
 
   override def receiveCommand = ({
     case Tcp.Received(data) =>
-      val received = data.utf8String
-      buffer.append(received)
-      if (received.endsWith("\r\n")) {
-        payload = Payload(fromResp(buffer), db = db, destination = Some(self))
-        buffer.clear()
+      val input = readInput(data.utf8String)
+      if (input.size > 0) {
+        payload = Payload(input, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
           case Some(error) => deliver(error)
@@ -631,7 +654,7 @@ class ClientNode extends Node[Null] {
       }
     case Tcp.PeerClosed => context stop self
     case Response(_, response) => client.foreach {client =>
-      client ! Tcp.Write(ByteString(toResp(response)))
+      client ! Tcp.Write(ByteString(writeOutput(response)))
     }
   }: Receive) orElse super.receiveCommand
 
