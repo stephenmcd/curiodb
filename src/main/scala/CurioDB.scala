@@ -127,6 +127,8 @@ object Commands {
       "_del"         -> Spec(default = nil, writes = true),
       "_keys"        -> Spec(args = 0 to 1, keyed = false),
       "_randomkey"   -> Spec(keyed = false),
+      "_flushdb"     -> Spec(keyed = false),
+      "_flushall"    -> Spec(keyed = false),
       "exists"       -> Spec(args = 1 to many, keyed = false),
       "expire"       -> Spec(args = 1, default = zero),
       "expireat"     -> Spec(args = 1, default = zero),
@@ -142,22 +144,29 @@ object Commands {
     ),
 
     "client" -> Map(
-      "bitop"        -> Spec(args = 3 to many, default = zero),
+      "bitop"        -> Spec(args = 3 to many),
       "dbsize"       -> Spec(keyed = false),
       "del"          -> Spec(args = 1 to many, keyed = false),
+      "echo"         -> Spec(args = 1, keyed = false),
+      "flushdb"      -> Spec(keyed = false),
+      "flushall"     -> Spec(keyed = false),
       "keys"         -> Spec(args = 1, keyed = false),
-      "scan"         -> Spec(args = 1 to 3, keyed = false),
-      "sdiff"        -> Spec(args = 0 to many, default = seq, keyed = false),
-      "sdiffstore"   -> Spec(args = 1 to many, default = zero),
-      "select"       -> Spec(args = 1, keyed = false),
-      "sinter"       -> Spec(args = 0 to many, default = seq, keyed = false),
-      "sinterstore"  -> Spec(args = 1 to many, default = zero),
-      "sunion"       -> Spec(args = 0 to many, default = seq, keyed = false),
-      "sunionstore"  -> Spec(args = 1 to many, default = zero),
-      "randomkey"    -> Spec(keyed = false),
       "mget"         -> Spec(args = 1 to many, keyed = false),
       "mset"         -> Spec(args = evens, keyed = false),
-      "msetnx"       -> Spec(args = evens, keyed = false)
+      "msetnx"       -> Spec(args = evens, keyed = false),
+      "ping"         -> Spec(keyed = false),
+      "quit"         -> Spec(keyed = false),
+      "randomkey"    -> Spec(keyed = false),
+      "scan"         -> Spec(args = 1 to 3, keyed = false),
+      "shutdown"     -> Spec(args = 0 to 1, keyed = false),
+      "sdiff"        -> Spec(args = 0 to many, keyed = false),
+      "sdiffstore"   -> Spec(args = 1 to many),
+      "select"       -> Spec(args = 1, keyed = false),
+      "sinter"       -> Spec(args = 0 to many, keyed = false),
+      "sinterstore"  -> Spec(args = 1 to many),
+      "sunion"       -> Spec(args = 0 to many, keyed = false),
+      "sunionstore"  -> Spec(args = 1 to many),
+      "time"         -> Spec(keyed = false)
     )
 
   )
@@ -516,6 +525,8 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
     case "_del"       => (payload.key +: args).map(delete)
     case "_keys"      => pattern(db.keys, args(0))
     case "_randomkey" => randomItem(db.keys)
+    case "_flushdb"   => db.clear; "OK"
+    case "_flushall"  => value.clear; "OK"
     case "exists"     => args.map(db.contains)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
@@ -563,6 +574,7 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
 class ClientNode extends Node[Null] {
 
   var value = null
+  var quitting = false
   val buffer = new StringBuilder()
   var client: Option[ActorRef] = None
   var aggregateId = 0
@@ -581,8 +593,10 @@ class ClientNode extends Node[Null] {
     case "dbsize"      => aggregate(Props[AggregateDbSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
-    case "scan"        => aggregate(Props[AggregateScan])
+    case "flushdb"     => aggregate(Props[AggregateFlushDb])
+    case "flushall"    => aggregate(Props[AggregateFlushAll])
     case "randomkey"   => aggregate(Props[AggregateRandomKey])
+    case "scan"        => aggregate(Props[AggregateScan])
     case "sdiff"       => aggregate(Props[AggregateSDiff])
     case "sinter"      => aggregate(Props[AggregateSInter])
     case "sunion"      => aggregate(Props[AggregateSUnion])
@@ -590,6 +604,11 @@ class ClientNode extends Node[Null] {
     case "sinterstore" => aggregate(Props[AggregateSInterStore])
     case "sunionstore" => aggregate(Props[AggregateSUnionStore])
     case "select"      => db = args(0); "OK"
+    case "echo"        => args(0)
+    case "ping"        => "PONG"
+    case "time"        => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
+    case "shutdown"    => context.system.shutdown()
+    case "quit"        => quitting = true; "OK"
   }
 
   def validate = {
@@ -655,6 +674,7 @@ class ClientNode extends Node[Null] {
     case Tcp.PeerClosed => context stop self
     case Response(_, response) => client.foreach {client =>
       client ! Tcp.Write(ByteString(writeOutput(response)))
+      if (quitting) self ! "_del"
     }
   }: Receive) orElse super.receiveCommand
 
@@ -753,6 +773,15 @@ class AggregateMSetNX extends AggregateBool("exists") {
     trues.isEmpty
   }
 }
+
+abstract class AggregateOK(command: String) extends AggregateBroadcast[String](command) {
+  override def complete = "OK"
+}
+
+class AggregateFlushDb extends AggregateOK("_flushdb")
+
+class AggregateFlushAll extends AggregateOK("_flushall")
+
 
 class Server(listen: URI) extends Actor {
   IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
