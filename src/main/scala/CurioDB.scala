@@ -2,6 +2,7 @@ package curiodb
 
 import akka.actor._
 import akka.cluster.Cluster
+import akka.dispatch.ControlMessage
 import akka.event.LoggingReceive
 import akka.io.{IO, Tcp}
 import akka.persistence._
@@ -222,7 +223,7 @@ trait PayloadProcessing extends Actor {
       case None => Payload(input, payload.db, destination)
     })
 
-  def deliver(response: Any) = if (response != ()) payload.destination.foreach {destination =>
+  def respond(response: Any) = if (response != ()) payload.destination.foreach {destination =>
     destination ! Response(payload.key, response)
   }
 
@@ -256,11 +257,16 @@ trait PayloadProcessing extends Actor {
 
 }
 
+case class Persist extends ControlMessage
+
+case class Delete extends ControlMessage
+
 abstract class Node[T] extends PersistentActor with PayloadProcessing with ActorLogging {
 
   var value: T
   var lastSnapshot: Option[SnapshotMetadata] = None
-  val persistence = context.system.settings.config.getBoolean("curiodb.persistence")
+  var persisting: Boolean = false
+  val persistAfter = context.system.settings.config.getInt("curiodb.persist-after")
 
   type Run = PartialFunction[String, Any]
 
@@ -268,10 +274,18 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   def persistenceId = self.path.name
 
-  def save = if (persistence) saveSnapshot(value)
+  def save = {
+    if (persistAfter == 0) saveSnapshot(value)
+    else if (persistAfter > 0 && !persisting) {
+      persisting = true
+      context.system.scheduler.scheduleOnce(persistAfter milliseconds) {
+        self ! Persist
+      }
+    }
+  }
 
   def deleteOldSnapshots(stopping: Boolean = false) =
-    if (persistence)
+    if (persistAfter >= 0)
       lastSnapshot.foreach {meta =>
         val criteria = if (stopping) SnapshotSelectionCriteria()
         else SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
@@ -287,10 +301,11 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
   def receiveCommand: Receive = {
     case SaveSnapshotSuccess(meta) => lastSnapshot = Some(meta); deleteOldSnapshots()
     case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
-    case "_del" => deleteOldSnapshots(stopping = true); context stop self
+    case Persist => persisting = false; saveSnapshot(value)
+    case Delete => deleteOldSnapshots(stopping = true); context stop self
     case p: Payload =>
       payload = p
-      deliver(Try(run(payload.command)) match {
+      respond(Try(run(payload.command)) match {
         case Success(response) => if (Commands.writes(payload.command)) save; response
         case Failure(e) => log.error(e, s"Error running: $payload"); "unknown error"
       })
@@ -391,7 +406,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
       blocked += payload
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= payload
-        deliver(null)
+        respond(null)
       }; ()
     } else run(payload.command.tail)
   }
@@ -400,7 +415,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
     while (value.size > 0 && blocked.size > 0) {
       payload = blocked.head
       blocked -= payload
-      deliver(run(payload.command.tail))
+      respond(run(payload.command.tail))
     }
     result
   }
@@ -409,13 +424,13 @@ class ListNode extends Node[ArrayBuffer[String]] {
     case "_rename"    => rename(value, "_lstore")
     case "_lstore"    => value.clear; run("lpush")
     case "_sort"      => sort(value)
-    case "lpush"      => args ++=: value; deliver(run("llen"))
-    case "rpush"      => value ++= args; deliver(run("llen"))
+    case "lpush"      => args ++=: value; respond(run("llen"))
+    case "rpush"      => value ++= args; respond(run("llen"))
     case "lpushx"     => run("lpush")
     case "rpushx"     => run("rpush")
     case "lpop"       => val x = value(0); value -= x; x
     case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
-    case "lset"       => value(args(0).toInt) = args(1); deliver("OK")
+    case "lset"       => value(args(0).toInt) = args(1); respond("OK")
     case "lindex"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
     case "lrem"       => value.remove(args(0).toInt)
     case "lrange"     => slice(value)
@@ -427,7 +442,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
     case "rpoplpush"  => val x = run("rpop"); route("lpush" +: args :+ x.toString); x
     case "linsert"    =>
       val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
-      if (i >= 0) {value.insert(i, args(2)); deliver(run("llen"))} else -1
+      if (i >= 0) {value.insert(i, args(2)); respond(run("llen"))} else -1
   }: Run) andThen unblock
 
 }
@@ -517,7 +532,7 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
   }
 
   def delete(key: String) = db.remove(key) match {
-    case Some(entry) => entry.node ! "_del"; true
+    case Some(entry) => entry.node ! Delete; true
     case None => false
   }
 
@@ -554,7 +569,7 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
 
   override def receiveCommand = ({
     case Unrouted(p) => payload = p; validate match {
-      case Some(errorOrDefault) => deliver(errorOrDefault)
+      case Some(errorOrDefault) => respond(errorOrDefault)
       case None =>
         val overwrite = !db.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
         if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
@@ -665,7 +680,7 @@ class ClientNode extends Node[Null] {
         payload = Payload(input, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
-          case Some(error) => deliver(error)
+          case Some(error) => respond(error)
           case None =>
             if (payload.nodeType == "client") self ! payload
             else route(clientPayload = Option(payload))
@@ -674,7 +689,7 @@ class ClientNode extends Node[Null] {
     case Tcp.PeerClosed => context stop self
     case Response(_, response) => client.foreach {client =>
       client ! Tcp.Write(ByteString(writeOutput(response)))
-      if (quitting) self ! "_del"
+      if (quitting) self ! Delete
     }
   }: Receive) orElse super.receiveCommand
 
@@ -697,7 +712,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
-      if (responses.size == keys.size) {deliver(complete); context stop self}
+      if (responses.size == keys.size) {respond(complete); context stop self}
   }
 
 }
