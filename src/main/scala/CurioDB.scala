@@ -12,7 +12,7 @@ import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
 import java.net.{InetSocketAddress, URI}
 import scala.collection.JavaConversions._
-import scala.collection.mutable.{ArrayBuffer, Map => MutableMap, Set, LinkedHashSet}
+import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure, Random, Try}
@@ -47,12 +47,9 @@ object Commands {
 
     "string" -> Map(
       "append"       -> Spec(args = 1, writes = true),
-      "bitcount"     -> Spec(args = 0 to 2, default = zero),
-      "bitpos"       -> Spec(args = 1 to 3, default = neg1),
       "decr"         -> Spec(writes = true),
       "decrby"       -> Spec(args = 1, writes = true),
       "get"          -> Spec(default = nil),
-      "getbit"       -> Spec(args = 1, default = zero),
       "getrange"     -> Spec(args = 2, default = string),
       "getset"       -> Spec(args = 1, writes = true),
       "incr"         -> Spec(writes = true),
@@ -60,7 +57,6 @@ object Commands {
       "incrbyfloat"  -> Spec(args = 1, writes = true),
       "psetex"       -> Spec(args = 2, overwrites = true),
       "set"          -> Spec(args = 1 to 4, overwrites = true),
-      "setbit"       -> Spec(args = 2, writes = true),
       "setex"        -> Spec(args = 2, overwrites = true),
       "setnx"        -> Spec(args = 1, default = zero, writes = true),
       "setrange"     -> Spec(args = 2, writes = true),
@@ -124,6 +120,16 @@ object Commands {
       "sscan"        -> Spec(args = 1 to 3, default = scan)
     ),
 
+    "bitmap" -> Map(
+      "_rename"      -> Spec(args = 1),
+      "_bstore"      -> Spec(args = 0 to many, overwrites = true),
+      "_bget"        -> Spec(default = seq),
+      "setbit"       -> Spec(args = 2, writes = true),
+      "bitcount"     -> Spec(args = 0 to 2, default = zero),
+      "bitpos"       -> Spec(args = 1 to 3, default = (args: Seq[String]) => -args(0).toInt),
+      "getbit"       -> Spec(args = 1, default = zero)
+    ),
+
     "keys" -> Map(
       "_del"         -> Spec(default = nil, writes = true),
       "_keys"        -> Spec(args = 0 to 1, keyed = false),
@@ -145,7 +151,7 @@ object Commands {
     ),
 
     "client" -> Map(
-      "bitop"        -> Spec(args = 3 to many),
+      "bitop"        -> Spec(args = 3 to many, keyed = false),
       "dbsize"       -> Spec(keyed = false),
       "del"          -> Spec(args = 1 to many, keyed = false),
       "echo"         -> Spec(args = 1, keyed = false),
@@ -250,9 +256,12 @@ trait PayloadProcessing extends Actor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
+  def bounds(from: Int, to: Int, size: Int) =
+    (if (from < 0) size + from else from, (if (to < 0) size + to else to) + 1)
+
   def slice[T](value: Seq[T]): Seq[T] = {
-    val to = args(1).toInt
-    value.slice(args(0).toInt, if (to < 0) value.size + 1 + to else to + 1)
+    val (from, to) = bounds(args(0).toInt, args(1).toInt, value.size)
+    value.slice(from, to)
   }
 
 }
@@ -358,20 +367,42 @@ class StringNode extends Node[String] {
     case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
     case "decr"        => value = (valueOrZero.toInt - 1).toString; value.toInt
     case "decrby"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
-    case "bitcount"    => value.getBytes.map{_.toInt.toBinaryString.count(_ == "1")}.sum
-    case "bitop"       => Error("not implemented")
-    case "bitpos"      => Error("not implemented")
-    case "getbit"      => Error("not implemented")
-    case "setbit"      => Error("not implemented")
     case "setex"       => val x = run("set"); expire("expire"); x
     case "psetex"      => val x = run("set"); expire("pexpire"); x
   }
 
 }
 
-class HashNode extends Node[MutableMap[String, String]] {
+class BitmapNode extends Node[mutable.BitSet] {
 
-  var value = MutableMap[String, String]()
+  var value = mutable.BitSet()
+
+  def last = value.lastOption.getOrElse(0)
+
+  def run = {
+    case "_rename"     => rename(value, "_bstore")
+    case "_bstore"     => value.clear; value ++= args.map(_.toInt); last / 8 + (if (value.isEmpty) 0 else 1)
+    case "_bget"       => value
+    case "bitcount"    => value.size
+    case "getbit"      => value(args(0).toInt)
+    case "setbit"      => val x = run("getbit"); value(args(0).toInt) = args(1) == "1"; x
+    case "bitpos"      =>
+      var x = value
+      if (args.size > 1) {
+        val (from, to) = bounds(args(1).toInt, if (args.size == 3) args(2).toInt else last, last + 1)
+        x = x.range(from, to)
+      }
+      if (args(0) == "1") x.headOption.getOrElse(-1)
+      else (0 to x.lastOption.getOrElse(-1)).collectFirst({
+        case i: Int if !x.contains(i) => i
+      }).getOrElse(if (args.size > 1 && value.size > 1) -1 else 0)
+  }
+
+}
+
+class HashNode extends Node[mutable.Map[String, String]] {
+
+  var value = mutable.Map[String, String]()
 
   def set(arg: Any) = {val x = arg.toString; value(args(0)) = x; x}
 
@@ -396,10 +427,10 @@ class HashNode extends Node[MutableMap[String, String]] {
 
 }
 
-class ListNode extends Node[ArrayBuffer[String]] {
+class ListNode extends Node[mutable.ArrayBuffer[String]] {
 
-  var value = ArrayBuffer[String]()
-  var blocked = LinkedHashSet[Payload]()
+  var value = mutable.ArrayBuffer[String]()
+  var blocked = mutable.LinkedHashSet[Payload]()
 
   def block: Any = {
     if (value.isEmpty) {
@@ -434,7 +465,7 @@ class ListNode extends Node[ArrayBuffer[String]] {
     case "lindex"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
     case "lrem"       => value.remove(args(0).toInt)
     case "lrange"     => slice(value)
-    case "ltrim"      => value = slice(value).asInstanceOf[ArrayBuffer[String]]; "OK"
+    case "ltrim"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; "OK"
     case "llen"       => value.size
     case "blpop"      => block
     case "brpop"      => block
@@ -447,9 +478,9 @@ class ListNode extends Node[ArrayBuffer[String]] {
 
 }
 
-class SetNode extends Node[Set[String]] {
+class SetNode extends Node[mutable.Set[String]] {
 
-  var value = Set[String]()
+  var value = mutable.Set[String]()
 
   def run = {
     case "_rename"     => rename(value, "_sstore")
@@ -475,12 +506,12 @@ class NodeEntry(
     @transient var expiry: Option[(Long, Cancellable)] = None)
   extends Serializable
 
-class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
+class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] {
 
-  var value = MutableMap[String, MutableMap[String, NodeEntry]]()
+  var value = mutable.Map[String, mutable.Map[String, NodeEntry]]()
   val wrongType = Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
 
-  def dbFor(name: String) = value.getOrElseUpdate(name, MutableMap[String, NodeEntry]())
+  def dbFor(name: String) = value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
 
   def db = dbFor(payload.db)
 
@@ -524,6 +555,7 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
   def create(db: String, key: String, nodeType: String, recovery: Boolean = false) = {
     dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
       case "string" => Props[StringNode]
+      case "bitmap" => Props[BitmapNode]
       case "hash"   => Props[HashNode]
       case "list"   => Props[ListNode]
       case "set"    => Props[SetNode]
@@ -579,7 +611,7 @@ class KeyNode extends Node[MutableMap[String, MutableMap[String, NodeEntry]]] {
 
   override def receiveRecover: Receive = {
     case SnapshotOffer(_, snapshot) =>
-      snapshot.asInstanceOf[MutableMap[String, MutableMap[String, NodeEntry]]].foreach {db =>
+      snapshot.asInstanceOf[mutable.Map[String, mutable.Map[String, NodeEntry]]].foreach {db =>
         db._2.foreach {item => create(db._1, item._1, item._2.nodeType, recovery = true)}
       }
   }
@@ -605,6 +637,7 @@ class ClientNode extends Node[Null] {
     case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
+    case "bitop"       => aggregate(Props[AggregateBitOp])
     case "dbsize"      => aggregate(Props[AggregateDbSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
@@ -612,12 +645,12 @@ class ClientNode extends Node[Null] {
     case "flushall"    => aggregate(Props[AggregateFlushAll])
     case "randomkey"   => aggregate(Props[AggregateRandomKey])
     case "scan"        => aggregate(Props[AggregateScan])
-    case "sdiff"       => aggregate(Props[AggregateSDiff])
-    case "sinter"      => aggregate(Props[AggregateSInter])
-    case "sunion"      => aggregate(Props[AggregateSUnion])
-    case "sdiffstore"  => aggregate(Props[AggregateSDiffStore])
-    case "sinterstore" => aggregate(Props[AggregateSInterStore])
-    case "sunionstore" => aggregate(Props[AggregateSUnionStore])
+    case "sdiff"       => aggregate(Props[AggregateSet])
+    case "sinter"      => aggregate(Props[AggregateSet])
+    case "sunion"      => aggregate(Props[AggregateSet])
+    case "sdiffstore"  => aggregate(Props[AggregateSetStore])
+    case "sinterstore" => aggregate(Props[AggregateSetStore])
+    case "sunionstore" => aggregate(Props[AggregateSetStore])
     case "select"      => db = args(0); "OK"
     case "echo"        => args(0)
     case "ping"        => "PONG"
@@ -697,11 +730,11 @@ class ClientNode extends Node[Null] {
 
 abstract class Aggregate[T](val command: String) extends Actor with PayloadProcessing {
 
-  var responses = MutableMap[String, T]()
+  var responses = mutable.Map[String, T]()
 
   def keys = args
 
-  def ordered = keys.map((key: String) => responses(key))
+  def ordered = keys.map(responses(_))
 
   def complete: Any = ordered
 
@@ -719,29 +752,36 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
 
 class AggregateMGet extends Aggregate[String]("get")
 
-abstract class AggregateSet(reducer: (Set[String], Set[String]) => Set[String])
-  extends Aggregate[Set[String]]("smembers") {
-  override def complete: Any = ordered.reduce(reducer)
+class AggregateSet extends Aggregate[mutable.Set[String]]("smembers") {
+  override def complete: Any = payload.command match {
+    case x: String if (x.startsWith("sdiff"))  => ordered.reduce(_ &~ _)
+    case x: String if (x.startsWith("sinter")) => ordered.reduce(_ & _)
+    case x: String if (x.startsWith("sunion")) => ordered.reduce(_ | _)
+  }
 }
 
-class AggregateSetStore(reducer: (Set[String], Set[String]) => Set[String]) extends AggregateSet(reducer) {
+class AggregateSetStore extends AggregateSet {
   override def complete: Unit = {
-    val result = super.complete.asInstanceOf[Set[String]].toSeq
+    val result = super.complete.asInstanceOf[Seq[String]]
     route(Seq("_sstore", payload.key) ++ result, destination = payload.destination)
   }
 }
 
-class AggregateSDiff extends AggregateSet(_ &~ _)
-
-class AggregateSInter extends AggregateSet(_ & _)
-
-class AggregateSUnion extends AggregateSet(_ | _)
-
-class AggregateSDiffStore extends AggregateSetStore(_ &~ _)
-
-class AggregateSInterStore extends AggregateSetStore(_ & _)
-
-class AggregateSUnionStore extends AggregateSetStore(_ | _)
+class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
+  override def keys = args.slice(2, args.size)
+  override def complete: Unit = {
+    val result = args(0).toUpperCase match {
+      case "AND" => ordered.reduce(_ & _)
+      case "OR"  => ordered.reduce(_ | _)
+      case "XOR" => ordered.reduce(_ ^ _)
+      case "NOT" =>
+        val from = ordered(0).headOption.getOrElse(1) - 1
+        val to = ordered(0).lastOption.getOrElse(1) - 1
+        mutable.BitSet(from until to: _*) ^ ordered(0)
+    }
+    route(Seq("_bstore", args(1)) ++ result, destination = payload.destination)
+  }
+}
 
 abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
   lazy val broadcast = Broadcast(Payload(command +: broadcastArgs, db = payload.db, destination = Some(self)))
@@ -758,10 +798,6 @@ class AggregateKeys extends BaseAggregateKeys {
   override def complete = reduced
 }
 
-class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
-  override def complete = randomItem(responses.values.filter(_ != ""))
-}
-
 class AggregateScan extends BaseAggregateKeys {
   override def broadcastArgs = Seq("*")
   override def complete = scan(reduced)
@@ -770,6 +806,10 @@ class AggregateScan extends BaseAggregateKeys {
 class AggregateDbSize extends BaseAggregateKeys {
   override def broadcastArgs = Seq("*")
   override def complete = reduced.size
+}
+
+class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
+  override def complete = randomItem(responses.values.filter(_ != ""))
 }
 
 abstract class AggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {
@@ -796,7 +836,6 @@ abstract class AggregateOK(command: String) extends AggregateBroadcast[String](c
 class AggregateFlushDb extends AggregateOK("_flushdb")
 
 class AggregateFlushAll extends AggregateOK("_flushall")
-
 
 class Server(listen: URI) extends Actor {
   IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
