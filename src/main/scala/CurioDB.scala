@@ -18,13 +18,15 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{Success, Failure, Random, Try}
 
 case class Spec(
-  val args: Any = 0,
-  val default: (Seq[String] => Any) = (_ => ()),
-  val keyed: Boolean = true,
-  val writes: Boolean = false,
-  val overwrites: Boolean = false)
+  args: Any = 0,
+  default: (Seq[String] => Any) = (_ => ()),
+  keyed: Boolean = true,
+  writes: Boolean = false,
+  overwrites: Boolean = false)
 
-case class Error(message: String, prefix: String = "ERR")
+case class Error(message: String = "syntax error", prefix: String = "ERR")
+
+case class SimpleReply(message: String = "OK")
 
 object Commands {
 
@@ -33,7 +35,7 @@ object Commands {
 
   val error  = (_: Seq[String]) => Error("no such key")
   val nil    = (_: Seq[String]) => null
-  val ok     = (_: Seq[String]) => "OK"
+  val ok     = (_: Seq[String]) => SimpleReply()
   val zero   = (_: Seq[String]) => 0
   val neg1   = (_: Seq[String]) => -1
   val neg2   = (_: Seq[String]) => -2
@@ -202,7 +204,8 @@ case class Payload(input: Seq[Any] = Seq(), db: String = "0", destination: Optio
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val key = if (nodeType != "" && input.size > 1 && Commands.keyed(command)) input(1).toString else ""
   val args = input.slice(if (key == "") 1 else 2, input.size).map(_.toString)
-  lazy val argPairs = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
+  lazy val argsPaired = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
+  lazy val argsUpper = args.map(_.toUpperCase)
 }
 
 case class Unrouted(payload: Payload) extends ConsistentHashable {
@@ -217,7 +220,9 @@ trait PayloadProcessing extends Actor {
 
   def args = payload.args
 
-  def argPairs = payload.argPairs
+  def argsPaired = payload.argsPaired
+
+  def argsUpper = payload.argsUpper
 
   def route(
       input: Seq[Any] = Seq(),
@@ -257,11 +262,11 @@ trait PayloadProcessing extends Actor {
   }
 
   def bounds(from: Int, to: Int, size: Int) =
-    (if (from < 0) size + from else from, (if (to < 0) size + to else to) + 1)
+    (if (from < 0) size + from else from, if (to < 0) size + to else to)
 
   def slice[T](value: Seq[T]): Seq[T] = {
     val (from, to) = bounds(args(0).toInt, args(1).toInt, value.size)
-    value.slice(from, to)
+    value.slice(from, to + 1)
   }
 
 }
@@ -316,7 +321,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
       payload = p
       respond(Try(run(payload.command)) match {
         case Success(response) => if (Commands.writes(payload.command)) save; response
-        case Failure(e) => log.error(e, s"Error running: $payload"); "unknown error"
+        case Failure(e) => log.error(e, s"Error running: $payload"); Error
       })
   }
 
@@ -332,12 +337,11 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   def sort(values: Iterable[String]): Any = {
     // TODO: BY/GET support.
-    val upper = args.map(_.toUpperCase)
-    var sorted = if (upper.contains("ALPHA")) values.toSeq.sorted else values.toSeq.sortBy(_.toFloat)
-    if (upper.contains("DESC")) sorted = sorted.reverse
-    val limit = upper.indexOf("LIMIT")
+    var sorted = if (argsUpper.contains("ALPHA")) values.toSeq.sorted else values.toSeq.sortBy(_.toFloat)
+    if (argsUpper.contains("DESC")) sorted = sorted.reverse
+    val limit = argsUpper.indexOf("LIMIT")
     if (limit > -1) sorted = sorted.slice(args(limit + 1).toInt, args(limit + 2).toInt)
-    val store = upper.indexOf("STORE")
+    val store = argsUpper.indexOf("STORE")
     if (store > -1) {route(Seq("_lstore", args(store + 1)) ++ sorted); sorted.size}
     else sorted
   }
@@ -355,7 +359,7 @@ class StringNode extends Node[String] {
   def run = {
     case "_rename"     => rename(value, "set")
     case "get"         => value
-    case "set"         => value = args(0); "OK"
+    case "set"         => value = args(0); SimpleReply()
     case "setnx"       => run("set"); true
     case "getset"      => val x = value; value = args(0); x
     case "append"      => value += args(0); value
@@ -390,7 +394,7 @@ class BitmapNode extends Node[mutable.BitSet] {
       var x = value
       if (args.size > 1) {
         val (from, to) = bounds(args(1).toInt, if (args.size == 3) args(2).toInt else last, last + 1)
-        x = x.range(from, to)
+        x = x.range(from, to + 1)
       }
       if (args(0) == "1") x.headOption.getOrElse(-1)
       else (0 to x.lastOption.getOrElse(-1)).collectFirst({
@@ -414,12 +418,12 @@ class HashNode extends Node[mutable.Map[String, String]] {
     case "hscan"        => scan(value.keys)
     case "hget"         => value.getOrElse(args(0), null)
     case "hsetnx"       => if (!value.contains(args(0))) run("hset") else false
-    case "hgetall"      => value.map(x => Seq(x._1, x._2)).flatten
+    case "hgetall"      => value.flatMap(x => Seq(x._1, x._2))
     case "hvals"        => value.values
     case "hdel"         => val x = run("hexists"); value -= args(0); x
     case "hlen"         => value.size
     case "hmget"        => args.map(value.get(_))
-    case "hmset"        => argPairs.foreach {args => value(args._1) = args._2}; "OK"
+    case "hmset"        => argsPaired.foreach {args => value(args._1) = args._2}; SimpleReply()
     case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
     case "hincrbyfloat" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
     case "hset"         => val x = !value.contains(args(0)); set(args(1)); x
@@ -453,19 +457,19 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
 
   def run = ({
     case "_rename"    => rename(value, "_lstore")
-    case "_lstore"    => value.clear; run("lpush")
+    case "_lstore"    => value.clear; run("rpush")
     case "_sort"      => sort(value)
-    case "lpush"      => args ++=: value; respond(run("llen"))
-    case "rpush"      => value ++= args; respond(run("llen"))
+    case "lpush"      => value ++= args.reverse; run("llen")
+    case "rpush"      => value ++= args; run("llen")
     case "lpushx"     => run("lpush")
     case "rpushx"     => run("rpush")
     case "lpop"       => val x = value(0); value -= x; x
     case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
-    case "lset"       => value(args(0).toInt) = args(1); respond("OK")
+    case "lset"       => value(args(0).toInt) = args(1); SimpleReply()
     case "lindex"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
     case "lrem"       => value.remove(args(0).toInt)
     case "lrange"     => slice(value)
-    case "ltrim"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; "OK"
+    case "ltrim"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; SimpleReply()
     case "llen"       => value.size
     case "blpop"      => block
     case "brpop"      => block
@@ -517,7 +521,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   def expire(when: Long): Int = {
     run("persist")
-    val expires = ((when - System.currentTimeMillis).toInt milliseconds)
+    val expires = (when - System.currentTimeMillis).toInt milliseconds
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
       self ! Payload(Seq("_del", payload.key), db = payload.db)
     }
@@ -572,8 +576,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "_del"       => (payload.key +: args).map(delete)
     case "_keys"      => pattern(db.keys, args(0))
     case "_randomkey" => randomItem(db.keys)
-    case "_flushdb"   => db.clear; "OK"
-    case "_flushall"  => value.clear; "OK"
+    case "_flushdb"   => db.clear; SimpleReply()
+    case "_flushall"  => value.clear; SimpleReply()
     case "exists"     => args.map(db.contains)
     case "ttl"        => ttl / 1000
     case "pttl"       => ttl
@@ -583,7 +587,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "pexpireat"  => expire(args(0).toLong)
     case "type"       => if (db.contains(payload.key)) db(payload.key).nodeType else null
     case "renamenx"   => val x = db.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"     => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); "OK"
+    case "rename"     => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); SimpleReply()
     case "persist"    =>
       val entry = db(payload.key)
       entry.expiry match {
@@ -634,7 +638,7 @@ class ClientNode extends Node[Null] {
   }
 
   def run = {
-    case "mset"        => argPairs.foreach {args => route(Seq("set", args._1, args._2))}; "OK"
+    case "mset"        => argsPaired.foreach {args => route(Seq("set", args._1, args._2))}; SimpleReply()
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
     case "bitop"       => aggregate(Props[AggregateBitOp])
@@ -651,12 +655,12 @@ class ClientNode extends Node[Null] {
     case "sdiffstore"  => aggregate(Props[AggregateSetStore])
     case "sinterstore" => aggregate(Props[AggregateSetStore])
     case "sunionstore" => aggregate(Props[AggregateSetStore])
-    case "select"      => db = args(0); "OK"
+    case "select"      => db = args(0); SimpleReply()
     case "echo"        => args(0)
     case "ping"        => "PONG"
     case "time"        => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
     case "shutdown"    => context.system.shutdown()
-    case "quit"        => quitting = true; "OK"
+    case "quit"        => quitting = true; SimpleReply()
   }
 
   def validate = {
@@ -692,7 +696,7 @@ class ClientNode extends Node[Null] {
 
     Try(parts) match {
       case Success(output) => buffer.clear; output
-      case Failure(_) => Seq[String]()
+      case Failure(_)      => Seq[String]()
     }
 
   }
@@ -702,6 +706,7 @@ class ClientNode extends Node[Null] {
     case x: Boolean         => writeOutput(if (x) 1 else 0)
     case x: Integer         => s":$x$end"
     case Error(msg, prefix) => s"-$prefix $msg$end"
+    case SimpleReply(msg)   => s"+$msg$end"
     case null               => s"$$-1$end"
     case x                  => s"$$${x.toString.size}$end$x$end"
   }
@@ -728,7 +733,8 @@ class ClientNode extends Node[Null] {
 
 }
 
-abstract class Aggregate[T](val command: String) extends Actor with PayloadProcessing {
+abstract class Aggregate[T](val command: String)
+    extends Actor with PayloadProcessing with ActorLogging {
 
   var responses = mutable.Map[String, T]()
 
@@ -745,25 +751,36 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
-      if (responses.size == keys.size) {respond(complete); context stop self}
+      if (responses.size == keys.size) {
+        respond(Try(complete) match {
+          case Success(response) => response
+          case Failure(e) => log.error(e, s"Error running: $payload"); Error
+        })
+        context stop self
+      }
   }
 
 }
 
 class AggregateMGet extends Aggregate[String]("get")
 
-class AggregateSet extends Aggregate[mutable.Set[String]]("smembers") {
-  override def complete: Any = payload.command match {
-    case x: String if (x.startsWith("sdiff"))  => ordered.reduce(_ &~ _)
-    case x: String if (x.startsWith("sinter")) => ordered.reduce(_ & _)
-    case x: String if (x.startsWith("sunion")) => ordered.reduce(_ | _)
+abstract class AggregateSetReducer[T](command: String) extends Aggregate[T](command) {
+  lazy val reducer: (mutable.Set[String], mutable.Set[String]) => mutable.Set[String] = payload.command.tail match {
+    case x if x.startsWith("diff")  => (_ &~ _)
+    case x if x.startsWith("inter") => (_ & _)
+    case x if x.startsWith("union") => (_ | _)
   }
 }
 
-class AggregateSetStore extends AggregateSet {
+class BaseAggregateSet extends AggregateSetReducer[mutable.Set[String]]("smembers")
+
+class AggregateSet extends BaseAggregateSet {
+  override def complete: Any = ordered.reduce(reducer)
+}
+
+class AggregateSetStore extends BaseAggregateSet {
   override def complete: Unit = {
-    val result = super.complete.asInstanceOf[Seq[String]]
-    route(Seq("_sstore", payload.key) ++ result, destination = payload.destination)
+    route(Seq("_sstore", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
   }
 }
 
@@ -822,20 +839,20 @@ class AggregateDel extends AggregateBool("_del") {
 }
 
 class AggregateMSetNX extends AggregateBool("exists") {
-  override def keys = payload.argPairs.map(_._1)
+  override def keys = payload.argsPaired.map(_._1)
   override def complete = {
-    if (trues.isEmpty) payload.argPairs.foreach {args => route(Seq("set", args._1, args._2))}
+    if (trues.isEmpty) payload.argsPaired.foreach {args => route(Seq("set", args._1, args._2))}
     trues.isEmpty
   }
 }
 
-abstract class AggregateOK(command: String) extends AggregateBroadcast[String](command) {
-  override def complete = "OK"
+abstract class AggregateSimpleReply(command: String) extends AggregateBroadcast[String](command) {
+  override def complete = SimpleReply()
 }
 
-class AggregateFlushDb extends AggregateOK("_flushdb")
+class AggregateFlushDb extends AggregateSimpleReply("_flushdb")
 
-class AggregateFlushAll extends AggregateOK("_flushall")
+class AggregateFlushAll extends AggregateSimpleReply("_flushall")
 
 class Server(listen: URI) extends Actor {
   IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
