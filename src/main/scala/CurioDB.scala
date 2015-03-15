@@ -9,12 +9,14 @@ import akka.persistence._
 import akka.routing.{Broadcast, FromConfig}
 import akka.routing.ConsistentHashingRouter.ConsistentHashable
 import akka.util.ByteString
+import com.dictiography.collections.{IndexedTreeMap, IndexedTreeSet}
 import com.typesafe.config.ConfigFactory
 import java.net.{InetSocketAddress, URI}
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.math.{min, max}
 import scala.util.{Success, Failure, Random, Try}
 
 case class Spec(
@@ -122,6 +124,32 @@ object Commands {
       "sscan"        -> Spec(args = 1 to 3, default = scan)
     ),
 
+    "sortedset" -> Map(
+      "_rename"          -> Spec(args = 1),
+      "_zstore"          -> Spec(args = 0 to many, overwrites = true),
+      "_zget"            -> Spec(default = seq),
+      "_sort"            -> Spec(args = 0 to many),
+      "zadd"             -> Spec(args = evens, writes = true),
+      "zcard"            -> Spec(default = zero),
+      "zcount"           -> Spec(args = 2, default = zero),
+      "zincrby"          -> Spec(args = 2, writes = true),
+      "zlexcount"        -> Spec(args = 2, default = zero),
+      "zrange"           -> Spec(args = 2 to 3, default = seq),
+      "zrangebylex"      -> Spec(args = 2 to 5, default = seq),
+      "zrangebyscore"    -> Spec(args = 2 to 6, default = seq),
+      "zrank"            -> Spec(args = 1, default = nil),
+      "zrem"             -> Spec(args = 1 to many, default = zero, writes = true),
+      "zremrangebylex"   -> Spec(args = 2, writes = true),
+      "zremrangebyrank"  -> Spec(args = 2, writes = true),
+      "zremrangebyscore" -> Spec(args = 2, writes = true),
+      "zrevrange"        -> Spec(args = 2 to 3, default = seq),
+      "zrevrangebylex"   -> Spec(args = 2 to 5, default = seq),
+      "zrevrangebyscore" -> Spec(args = 2 to 6, default = seq),
+      "zrevrank"         -> Spec(args = 1, default = nil),
+      "zscan"            -> Spec(args = 1 to 3, default = scan),
+      "zscore"           -> Spec(args = 1, default = nil)
+    ),
+
     "bitmap" -> Map(
       "_rename"      -> Spec(args = 1),
       "_bstore"      -> Spec(args = 0 to many, overwrites = true),
@@ -175,7 +203,9 @@ object Commands {
       "sinterstore"  -> Spec(args = 1 to many),
       "sunion"       -> Spec(args = 0 to many, keyed = false),
       "sunionstore"  -> Spec(args = 1 to many),
-      "time"         -> Spec(keyed = false)
+      "time"         -> Spec(keyed = false),
+      "zinterstore"  -> Spec(args = 2 to many),
+      "zunionstore"  -> Spec(args = 2 to many)
     )
 
   )
@@ -503,6 +533,115 @@ class SetNode extends Node[mutable.Set[String]] {
 
 }
 
+case class SortedSetEntry(score: Int, key: String = "")(implicit ordering: Ordering[(Int, String)])
+    extends Ordered[SortedSetEntry] {
+  def compare(that: SortedSetEntry) = ordering.compare((this.score, this.key), (that.score, that.key))
+}
+
+class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[SortedSetEntry])] {
+
+  var value = (new IndexedTreeMap[String, Int](), new IndexedTreeSet[SortedSetEntry]())
+
+  def keys = value._1
+
+  def scores = value._2
+
+  def add(score: Int, key: String) = {
+    val exists = remove(key)
+    keys.put(key, score); scores.add(SortedSetEntry(score, key))
+    !exists
+  }
+
+  def remove(key: String) = {
+    val exists = keys.containsKey(key)
+    if (exists) {scores.remove(SortedSetEntry(keys.get(key), key)); keys.remove(key)}
+    exists
+  }
+
+  def increment(key: String, by: Int) = {
+    val score = (if (keys.containsKey(key)) keys.get(key) else 0) + by
+    remove(key); add(score, key)
+    score
+  }
+
+  def rank(key: String, reverse: Boolean = false) = {
+    val index = scores.entryIndex(SortedSetEntry(keys.get(key), key))
+    if (reverse) keys.size - index else index
+  }
+
+  def range(from: SortedSetEntry, to: SortedSetEntry, reverse: Boolean): Seq[String] = {
+    if (from.score > to.score) return Seq()
+    var result = scores.subSet(from, true, to, true).toSeq
+    result = limit[SortedSetEntry](if (reverse) result.reverse else result)
+    if (argsUpper.contains("WITHSCORES")) result.flatMap(x => Seq(x.key, x.score.toString))
+    else result.map(_.key)
+  }
+
+  def rangeByIndex(from: String, to: String, reverse: Boolean = false) = {
+    var (fromIndex, toIndex) = bounds(from.toInt, to.toInt, keys.size)
+    if (reverse) {
+      fromIndex = keys.size - fromIndex - 1
+      toIndex = keys.size - toIndex - 1
+    }
+    range(scores.exact(fromIndex), scores.exact(toIndex), reverse)
+  }
+
+  def rangeByScore(from: String, to: String, reverse: Boolean = false) = {
+    def parse(arg: String, dir: Int) = arg match {
+      case "-inf" => if (scores.isEmpty) 0 else scores.first().score
+      case "+inf" => if (scores.isEmpty) 0 else scores.last().score
+      case arg if arg.startsWith("(") => arg.toInt + dir
+      case _ => arg.toInt
+    }
+    range(SortedSetEntry(parse(from, 1)), SortedSetEntry(parse(to, -1) + 1), reverse)
+  }
+
+  def rangeByKey(from: String, to: String, reverse: Boolean = false): Seq[String] = {
+    def parse(arg: String) = arg match {
+      case "-" => ""
+      case "+" => if (keys.size == 0) "" else keys.lastKey() + "x"
+      case arg if "[(".indexOf(arg.head) > -1 => arg.tail
+    }
+    val (fromKey, toKey) = (parse(from), parse(to))
+    if (fromKey > toKey) return Seq()
+    val result = keys.subMap(fromKey, from.head == '[', toKey, to.head == '[').toSeq
+    limit[(String, Int)](if (reverse) result.reverse else result).map(_._1)
+  }
+
+  def limit[T](values: Seq[T]) = {
+    val i = argsUpper.indexOf("LIMIT")
+    if (i > 1) values.slice(args(i + 1).toInt, args(i + 1).toInt + args(i + 2).toInt)
+    else values
+  }
+
+  def run = {
+    case "_rename"          => rename(scores.flatMap(x => Seq(x.score, x.key)), "_zstore")
+    case "_zstore"          => keys.clear; scores.clear; run("zadd")
+    case "_zget"            => keys
+    case "_sort"            => sort(keys.keys)
+    case "zadd"             => argsPaired.map(arg => add(arg._1.toInt, arg._2)).filter(x => x).size
+    case "zcard"            => keys.size
+    case "zcount"           => rangeByScore(args(0), args(1)).size
+    case "zincrby"          => increment(args(0), args(1).toInt)
+    case "zlexcount"        => rangeByKey(args(0), args(1)).size
+    case "zrange"           => rangeByIndex(args(0), args(1))
+    case "zrangebylex"      => rangeByKey(args(0), args(1))
+    case "zrangebyscore"    => rangeByScore(args(0), args(1))
+    case "zrank"            => rank(args(0))
+    case "zrem"             => remove(args(0))
+    case "zremrangebylex"   => rangeByKey(args(0), args(1)).map(remove).filter(x => x).size
+    case "zremrangebyrank"  => rangeByIndex(args(0), args(1)).map(remove).filter(x => x).size
+    case "zremrangebyscore" => rangeByScore(args(0), args(1)).map(remove).filter(x => x).size
+    case "zrevrange"        => rangeByIndex(args(1), args(0), reverse = true)
+    case "zrevrangebylex"   => rangeByKey(args(1), args(0), reverse = true)
+    case "zrevrangebyscore" => rangeByScore(args(1), args(0), reverse = true)
+    case "zrevrank"         => rank(args(0), reverse = true)
+    case "zscan"            => scan(keys.keys)
+    case "zscore"           => keys.get(args(0))
+  }
+
+}
+
 @SerialVersionUID(1L)
 class NodeEntry(
     val nodeType: String,
@@ -558,11 +697,12 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   def create(db: String, key: String, nodeType: String, recovery: Boolean = false) = {
     dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
-      case "string" => Props[StringNode]
-      case "bitmap" => Props[BitmapNode]
-      case "hash"   => Props[HashNode]
-      case "list"   => Props[ListNode]
-      case "set"    => Props[SetNode]
+      case "string"    => Props[StringNode]
+      case "bitmap"    => Props[BitmapNode]
+      case "hash"      => Props[HashNode]
+      case "list"      => Props[ListNode]
+      case "set"       => Props[SetNode]
+      case "sortedset" => Props[SortedSetNode]
     }, s"$db-$nodeType-$key"))
     if (!recovery) save; dbFor(db)(key).node
   }
@@ -655,6 +795,8 @@ class ClientNode extends Node[Null] {
     case "sdiffstore"  => aggregate(Props[AggregateSetStore])
     case "sinterstore" => aggregate(Props[AggregateSetStore])
     case "sunionstore" => aggregate(Props[AggregateSetStore])
+    case "zinterstore" => aggregate(Props[AggregateSortedSetStore])
+    case "zunionstore" => aggregate(Props[AggregateSortedSetStore])
     case "select"      => db = args(0); SimpleReply()
     case "echo"        => args(0)
     case "ping"        => "PONG"
@@ -782,6 +924,39 @@ class AggregateSetStore extends BaseAggregateSet {
   override def complete: Unit = {
     route(Seq("_sstore", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
   }
+}
+
+class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String, Int]]("_zget") {
+
+  lazy val aggregatePos = argsUpper.indexOf("AGGREGATE")
+  lazy val aggregateName = if (aggregatePos == -1) "SUM" else argsUpper(aggregatePos + 1)
+  lazy val weightPos = argsUpper.indexOf("WEIGHTS")
+  lazy val aggregate: (Int, Int) => Int = aggregateName match {
+    case "SUM" => (_ + _)
+    case "MIN" => min _
+    case "MAX" => max _
+  }
+
+  def weight(i: Int) = if (weightPos == -1) 1 else args(weightPos + i + 1).toInt
+
+  override def keys = args.slice(1, args(0).toInt + 1)
+
+  override def complete: Unit = {
+    var i = 0
+    val result = ordered.reduce({(left, right) =>
+      val out = new IndexedTreeMap[String, Int]()
+      reducer(left.keySet, right.keySet).foreach {key =>
+        lazy val leftVal = left.get(key) * (if (i == 0) weight(i) else 1)
+        lazy val rightVal = right.get(key) * weight(i + 1)
+        val value = if (!right.containsKey(key)) leftVal
+          else if (!left.containsKey(key)) rightVal
+          else aggregate(leftVal, rightVal)
+        out.put(key, value)
+      }; i += 1; out
+    }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
+    route(Seq("_zstore", payload.key) ++ result, destination = payload.destination)
+  }
+
 }
 
 class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
