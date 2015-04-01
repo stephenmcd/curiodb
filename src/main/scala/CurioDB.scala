@@ -12,6 +12,7 @@ import akka.util.ByteString
 import com.dictiography.collections.{IndexedTreeMap, IndexedTreeSet}
 import com.typesafe.config.ConfigFactory
 import java.net.{InetSocketAddress, URI}
+import net.agkn.hll.HLL
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
@@ -33,7 +34,7 @@ case class SimpleReply(message: String = "OK")
 object Commands {
 
   val many = Int.MaxValue - 1
-  val evens = 2 to many by 2
+  val pairs = 2 to many by 2
 
   val error  = (_: Seq[String]) => Error("no such key")
   val nil    = (_: Seq[String]) => null
@@ -69,7 +70,7 @@ object Commands {
 
     "hash" -> Map(
       "_rename"      -> Spec(args = 1),
-      "_hstore"      -> Spec(args = evens, overwrites = true),
+      "_hstore"      -> Spec(args = pairs, overwrites = true),
       "hdel"         -> Spec(args = 1 to many, default = zeros, writes = true),
       "hexists"      -> Spec(args = 1, default = zero),
       "hget"         -> Spec(args = 1, default = nil),
@@ -79,7 +80,7 @@ object Commands {
       "hkeys"        -> Spec(default = seq),
       "hlen"         -> Spec(default = zero),
       "hmget"        -> Spec(args = 1 to many, default = nils),
-      "hmset"        -> Spec(args = evens, writes = true),
+      "hmset"        -> Spec(args = pairs, writes = true),
       "hscan"        -> Spec(args = 1 to 3, default = scan),
       "hset"         -> Spec(args = 2, writes = true),
       "hsetnx"       -> Spec(args = 2, writes = true),
@@ -129,7 +130,7 @@ object Commands {
       "_zstore"          -> Spec(args = 0 to many, overwrites = true),
       "_zget"            -> Spec(default = seq),
       "_sort"            -> Spec(args = 0 to many),
-      "zadd"             -> Spec(args = evens, writes = true),
+      "zadd"             -> Spec(args = pairs, writes = true),
       "zcard"            -> Spec(default = zero),
       "zcount"           -> Spec(args = 2, default = zero),
       "zincrby"          -> Spec(args = 2, writes = true),
@@ -158,6 +159,14 @@ object Commands {
       "bitcount"     -> Spec(args = 0 to 2, default = zero),
       "bitpos"       -> Spec(args = 1 to 3, default = (args: Seq[String]) => -args(0).toInt),
       "getbit"       -> Spec(args = 1, default = zero)
+    ),
+
+    "hyperloglog" -> Map(
+      "_rename"     -> Spec(args = 1),
+      "_pfstore"    -> Spec(args = 0 to many, overwrites = true),
+      "_pfget"      -> Spec(default = seq),
+      "_pfcount"    -> Spec(default = zero),
+      "pfadd"       -> Spec(args = 1 to many, writes = true)
     ),
 
     "keys" -> Map(
@@ -189,11 +198,13 @@ object Commands {
       "flushall"     -> Spec(keyed = false),
       "keys"         -> Spec(args = 1, keyed = false),
       "mget"         -> Spec(args = 1 to many, keyed = false),
-      "mset"         -> Spec(args = evens, keyed = false),
-      "msetnx"       -> Spec(args = evens, keyed = false),
+      "mset"         -> Spec(args = pairs, keyed = false),
+      "msetnx"       -> Spec(args = pairs, keyed = false),
       "ping"         -> Spec(keyed = false),
       "quit"         -> Spec(keyed = false),
       "randomkey"    -> Spec(keyed = false),
+      "pfcount"      -> Spec(args = 1 to many, keyed = false),
+      "pfmerge"      -> Spec(args = 2 to many),
       "scan"         -> Spec(args = 1 to 3, keyed = false),
       "shutdown"     -> Spec(args = 0 to 1, keyed = false),
       "sdiff"        -> Spec(args = 0 to many, keyed = false),
@@ -233,7 +244,7 @@ case class Payload(input: Seq[Any] = Seq(), db: String = "0", destination: Optio
   val command = if (input.size > 0) input(0).toString.toLowerCase else ""
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val key = if (nodeType != "" && input.size > 1 && Commands.keyed(command)) input(1).toString else ""
-  val args = input.slice(if (key == "") 1 else 2, input.size).map(_.toString)
+  val args = input.drop(if (key == "") 1 else 2).map(_.toString)
   lazy val argsPaired = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
   lazy val argsUpper = args.map(_.toUpperCase)
 }
@@ -430,6 +441,26 @@ class BitmapNode extends Node[mutable.BitSet] {
       else (0 to x.lastOption.getOrElse(-1)).collectFirst({
         case i: Int if !x.contains(i) => i
       }).getOrElse(if (args.size > 1 && value.size > 1) -1 else 0)
+  }
+
+}
+
+class HyperLogLogNode extends Node[HLL] {
+
+  var value = new HLL(
+    context.system.settings.config.getInt("curiodb.hyperloglog.register-log"),
+    context.system.settings.config.getInt("curiodb.hyperloglog.register-width")
+  )
+
+  def run = {
+    case "_rename"  => rename(value.toBytes.map(_.toString), "_pfstore")
+    case "_pfcount" => value.cardinality.toInt
+    case "_pfstore" => value.clear(); value = HLL.fromBytes(args.map(_.toByte).toArray); SimpleReply()
+    case "_pfget"   => value
+    case "pfadd"    =>
+      val x = value.cardinality
+      args.foreach {x => value.addRaw(x.hashCode.toLong)}
+      if (x == value.cardinality) 0 else 1
   }
 
 }
@@ -697,12 +728,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   def create(db: String, key: String, nodeType: String, recovery: Boolean = false) = {
     dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
-      case "string"    => Props[StringNode]
-      case "bitmap"    => Props[BitmapNode]
-      case "hash"      => Props[HashNode]
-      case "list"      => Props[ListNode]
-      case "set"       => Props[SetNode]
-      case "sortedset" => Props[SortedSetNode]
+      case "string"      => Props[StringNode]
+      case "bitmap"      => Props[BitmapNode]
+      case "hyperloglog" => Props[HyperLogLogNode]
+      case "hash"        => Props[HashNode]
+      case "list"        => Props[ListNode]
+      case "set"         => Props[SetNode]
+      case "sortedset"   => Props[SortedSetNode]
     }, s"$db-$nodeType-$key"))
     if (!recovery) save; dbFor(db)(key).node
   }
@@ -736,7 +768,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       }
     case "sort"       =>
       db(payload.key).nodeType match {
-        case "list" | "set" =>
+        case "list" | "set" | "sortedset" =>
           val sortArgs = Seq("_sort", payload.key) ++ payload.args
           db(payload.key).node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
         case _ => wrongType
@@ -782,11 +814,13 @@ class ClientNode extends Node[Null] {
     case "msetnx"      => aggregate(Props[AggregateMSetNX])
     case "mget"        => aggregate(Props[AggregateMGet])
     case "bitop"       => aggregate(Props[AggregateBitOp])
-    case "dbsize"      => aggregate(Props[AggregateDbSize])
+    case "dbsize"      => aggregate(Props[AggregateDBSize])
     case "del"         => aggregate(Props[AggregateDel])
     case "keys"        => aggregate(Props[AggregateKeys])
-    case "flushdb"     => aggregate(Props[AggregateFlushDb])
+    case "flushdb"     => aggregate(Props[AggregateFlushDB])
     case "flushall"    => aggregate(Props[AggregateFlushAll])
+    case "pfcount"     => aggregate(Props[AggregateHyperLogLogCount])
+    case "pfmerge"     => aggregate(Props[AggregateHyperLogLogMerge])
     case "randomkey"   => aggregate(Props[AggregateRandomKey])
     case "scan"        => aggregate(Props[AggregateScan])
     case "sdiff"       => aggregate(Props[AggregateSet])
@@ -799,7 +833,7 @@ class ClientNode extends Node[Null] {
     case "zunionstore" => aggregate(Props[AggregateSortedSetStore])
     case "select"      => db = args(0); SimpleReply()
     case "echo"        => args(0)
-    case "ping"        => "PONG"
+    case "ping"        => SimpleReply("PONG")
     case "time"        => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
     case "shutdown"    => context.system.shutdown()
     case "quit"        => quitting = true; SimpleReply()
@@ -846,7 +880,7 @@ class ClientNode extends Node[Null] {
   def writeOutput(response: Any): String = response match {
     case x: Iterable[Any]   => s"*${x.size}${end}${x.map(writeOutput).mkString}"
     case x: Boolean         => writeOutput(if (x) 1 else 0)
-    case x: Integer         => s":$x$end"
+    case x: Number          => s":$x$end"
     case Error(msg, prefix) => s"-$prefix $msg$end"
     case SimpleReply(msg)   => s"+$msg$end"
     case null               => s"$$-1$end"
@@ -943,14 +977,14 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
 
   override def complete: Unit = {
     var i = 0
-    val result = ordered.reduce({(left, right) =>
+    val result = ordered.reduce({(x, y) =>
       val out = new IndexedTreeMap[String, Int]()
-      reducer(left.keySet, right.keySet).foreach {key =>
-        lazy val leftVal = left.get(key) * (if (i == 0) weight(i) else 1)
-        lazy val rightVal = right.get(key) * weight(i + 1)
-        val value = if (!right.containsKey(key)) leftVal
-          else if (!left.containsKey(key)) rightVal
-          else aggregate(leftVal, rightVal)
+      reducer(x.keySet, y.keySet).foreach {key =>
+        lazy val xVal = x.get(key) * (if (i == 0) weight(i) else 1)
+        lazy val yVal = y.get(key) * weight(i + 1)
+        val value = if (!y.containsKey(key)) xVal
+          else if (!x.containsKey(key)) yVal
+          else aggregate(xVal, yVal)
         out.put(key, value)
       }; i += 1; out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
@@ -960,7 +994,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
 }
 
 class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
-  override def keys = args.slice(2, args.size)
+  override def keys = args.drop(2)
   override def complete: Unit = {
     val result = args(0).toUpperCase match {
       case "AND" => ordered.reduce(_ & _)
@@ -972,6 +1006,17 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
         mutable.BitSet(from until to: _*) ^ ordered(0)
     }
     route(Seq("_bstore", args(1)) ++ result, destination = payload.destination)
+  }
+}
+
+class AggregateHyperLogLogCount extends Aggregate[Long]("_pfcount") {
+  override def complete = responses.values.sum
+}
+
+class AggregateHyperLogLogMerge extends Aggregate[HLL]("_pfget") {
+  override def complete = {
+    val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
+    route(Seq("_pfstore", payload.key) ++ result, destination = payload.destination)
   }
 }
 
@@ -995,7 +1040,7 @@ class AggregateScan extends BaseAggregateKeys {
   override def complete = scan(reduced)
 }
 
-class AggregateDbSize extends BaseAggregateKeys {
+class AggregateDBSize extends BaseAggregateKeys {
   override def broadcastArgs = Seq("*")
   override def complete = reduced.size
 }
@@ -1025,7 +1070,7 @@ abstract class AggregateSimpleReply(command: String) extends AggregateBroadcast[
   override def complete = SimpleReply()
 }
 
-class AggregateFlushDb extends AggregateSimpleReply("_flushdb")
+class AggregateFlushDB extends AggregateSimpleReply("_flushdb")
 
 class AggregateFlushAll extends AggregateSimpleReply("_flushall")
 

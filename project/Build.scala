@@ -13,12 +13,16 @@ object CurioDB extends Build {
       MergeStrategy.concat(tempDir, path, files.reverse)
   }
 
+  lazy val indexedTreeMap = RootProject(uri("git://github.com/stephenmcd/indexed-tree-map.git"))
+  lazy val hyperLogLog = RootProject(uri("git://github.com/stephenmcd/java-hll.git#with-fastutils"))
+
   lazy val root = Project("root", file("."))
-    .dependsOn(indexedTreeMap)
+    .dependsOn(indexedTreeMap, hyperLogLog)
     .settings(
       name := "curiodb",
       version := "0.0.1",
       fork := true,
+      mainClass in (Compile, run) := Some("curiodb.CurioDB"),
       resolvers += "Akka Snapshots" at "http://repo.akka.io/snapshots/",
       libraryDependencies ++= Seq(
         "com.typesafe.akka" %% "akka-actor" % akkaV,
@@ -35,7 +39,5 @@ object CurioDB extends Build {
       }
 
     )
-
-  lazy val indexedTreeMap = RootProject(uri("git://github.com/stephenmcd/indexed-tree-map.git"))
 
 }
