@@ -170,23 +170,31 @@ object Commands {
     ),
 
     "keys" -> Map(
-      "_del"         -> Spec(default = nil, writes = true),
-      "_keys"        -> Spec(args = 0 to 1, keyed = false),
-      "_randomkey"   -> Spec(keyed = false),
-      "_flushdb"     -> Spec(keyed = false),
-      "_flushall"    -> Spec(keyed = false),
-      "exists"       -> Spec(args = 1 to many, keyed = false),
-      "expire"       -> Spec(args = 1, default = zero),
-      "expireat"     -> Spec(args = 1, default = zero),
-      "persist"      -> Spec(default = zero),
-      "pexpire"      -> Spec(args = 1, default = zero),
-      "pexpireat"    -> Spec(args = 1, default = zero),
-      "pttl"         -> Spec(default = neg2),
-      "rename"       -> Spec(args = 1, default = error),
-      "renamenx"     -> Spec(args = 1, default = error),
-      "sort"         -> Spec(args = 0 to many, default = seq),
-      "ttl"          -> Spec(default = neg2),
-      "type"         -> Spec()
+      "_del"          -> Spec(default = nil, writes = true),
+      "_keys"         -> Spec(args = 0 to 1, keyed = false),
+      "_randomkey"    -> Spec(keyed = false),
+      "_flushdb"      -> Spec(keyed = false),
+      "_flushall"     -> Spec(keyed = false),
+      "_subscribe"    -> Spec(),
+      "_unsubscribe"  -> Spec(),
+      "_psubscribe"   -> Spec(keyed = false),
+      "_punsubscribe" -> Spec(keyed = false),
+      "_channels"     -> Spec(args = 1, keyed = false),
+      "_numsub"       -> Spec(),
+      "_numpat"       -> Spec(),
+      "exists"        -> Spec(args = 1 to many, keyed = false),
+      "expire"        -> Spec(args = 1, default = zero),
+      "expireat"      -> Spec(args = 1, default = zero),
+      "persist"       -> Spec(default = zero),
+      "pexpire"       -> Spec(args = 1, default = zero),
+      "pexpireat"     -> Spec(args = 1, default = zero),
+      "pttl"          -> Spec(default = neg2),
+      "rename"        -> Spec(args = 1, default = error),
+      "renamenx"      -> Spec(args = 1, default = error),
+      "sort"          -> Spec(args = 0 to many, default = seq),
+      "publish"       -> Spec(args = 1),
+      "ttl"           -> Spec(default = neg2),
+      "type"          -> Spec()
     ),
 
     "client" -> Map(
@@ -205,6 +213,11 @@ object Commands {
       "randomkey"    -> Spec(keyed = false),
       "pfcount"      -> Spec(args = 1 to many, keyed = false),
       "pfmerge"      -> Spec(args = 2 to many),
+      "pubsub"       -> Spec(args = 1 to many, keyed = false),
+      "subscribe"    -> Spec(args = 1 to many, keyed = false),
+      "unsubscribe"  -> Spec(args = 0 to many, keyed = false),
+      "psubscribe"   -> Spec(args = 1 to many, keyed = false),
+      "punsubscribe" -> Spec(args = 0 to many, keyed = false),
       "scan"         -> Spec(args = 1 to 3, keyed = false),
       "shutdown"     -> Spec(args = 0 to 1, keyed = false),
       "sdiff"        -> Spec(args = 0 to many, keyed = false),
@@ -268,12 +281,18 @@ trait PayloadProcessing extends Actor {
   def route(
       input: Seq[Any] = Seq(),
       destination: Option[ActorRef] = None,
-      clientPayload: Option[Payload] = None) =
+      clientPayload: Option[Payload] = None,
+      broadcast: Boolean = false) = {
 
-    context.system.actorSelection("/user/keys") ! Unrouted(clientPayload match {
+    val p = clientPayload match {
       case Some(payload) => payload
       case None => Payload(input, payload.db, destination)
-    })
+    }
+    val keys = context.system.actorSelection("/user/keys")
+
+    if (broadcast) keys ! Broadcast(p) else keys ! Unrouted(p)
+
+  }
 
   def respond(response: Any) = if (response != ()) payload.destination.foreach {destination =>
     destination ! Response(payload.key, response)
@@ -680,10 +699,14 @@ class NodeEntry(
     @transient var expiry: Option[(Long, Cancellable)] = None)
   extends Serializable
 
+case class PubSubEvent(event: String, channelOrPattern: String)
+
 class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] {
 
   var value = mutable.Map[String, mutable.Map[String, NodeEntry]]()
   val wrongType = Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
+  val channels = mutable.Map[String, mutable.Set[ActorRef]]()
+  val patterns = mutable.Map[String, mutable.Set[ActorRef]]()
 
   def dbFor(name: String) = value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
 
@@ -744,29 +767,62 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case None => false
   }
 
+  def subscribeOrUnsubscribe = {
+    val pattern = payload.command.startsWith("_p")
+    val current = if (pattern) patterns else channels
+    val key = if (pattern) args(0) else payload.key
+    val subscriber = payload.destination.get
+    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "subscribe"
+    val subscribers = if (subscribing) current.getOrElseUpdate(key, mutable.Set[ActorRef]())
+      else current.getOrElse(key, mutable.Set[ActorRef]())
+    val subscribed = subscribing && subscribers.add(subscriber)
+    val unsubscribed = !subscribing && subscribers.remove(subscriber)
+    if (unsubscribed && current(key).isEmpty) current -= key
+    if (subscribed || unsubscribed) subscriber ! PubSubEvent(payload.command.tail, key)
+  }
+
   override def run = {
-    case "_del"       => (payload.key +: args).map(delete)
-    case "_keys"      => pattern(db.keys, args(0))
-    case "_randomkey" => randomItem(db.keys)
-    case "_flushdb"   => db.clear; SimpleReply()
-    case "_flushall"  => value.clear; SimpleReply()
-    case "exists"     => args.map(db.contains)
-    case "ttl"        => ttl / 1000
-    case "pttl"       => ttl
-    case "expire"     => expire(System.currentTimeMillis + (args(0).toInt * 1000))
-    case "pexpire"    => expire(System.currentTimeMillis + args(0).toInt)
-    case "expireat"   => expire(args(0).toLong / 1000)
-    case "pexpireat"  => expire(args(0).toLong)
-    case "type"       => if (db.contains(payload.key)) db(payload.key).nodeType else null
-    case "renamenx"   => val x = db.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"     => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); SimpleReply()
-    case "persist"    =>
+    case "_del"          => (payload.key +: args).map(delete)
+    case "_keys"         => pattern(db.keys, args(0))
+    case "_randomkey"    => randomItem(db.keys)
+    case "_flushdb"      => db.clear; SimpleReply()
+    case "_flushall"     => value.clear; SimpleReply()
+    case "_numsub"       => channels.getOrElse(payload.key, mutable.Set[ActorRef]()).size
+    case "_numpat"       => patterns.values.map(_.size).sum
+    case "_channels"     => pattern(channels.keys, args(0))
+    case "_subscribe"    => subscribeOrUnsubscribe
+    case "_unsubscribe"  => subscribeOrUnsubscribe
+    case "_psubscribe"   => subscribeOrUnsubscribe
+    case "_punsubscribe" => subscribeOrUnsubscribe
+    case "publish"       =>
+      val subscribers = channels.getOrElse(payload.key, mutable.Set[ActorRef]())
+      val matches = patterns.filterKeys(!pattern(Seq(payload.key), _).isEmpty)
+      val message = Response(payload.key, Seq("message", payload.key, args(0)))
+      var sent = subscribers.size
+      subscribers.foreach(_ ! message)
+      matches.foreach {entry =>
+        val message = Response(payload.key, Seq("pmessage", entry._1, payload.key, args(0)))
+        sent += entry._2.size
+        entry._2.foreach(_ ! message)
+      }
+      sent
+    case "exists"        => args.map(db.contains)
+    case "ttl"           => ttl / 1000
+    case "pttl"          => ttl
+    case "expire"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
+    case "pexpire"       => expire(System.currentTimeMillis + args(0).toInt)
+    case "expireat"      => expire(args(0).toLong / 1000)
+    case "pexpireat"     => expire(args(0).toLong)
+    case "type"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
+    case "renamenx"      => val x = db.contains(payload.key); if (x) {run("rename")}; x
+    case "rename"        => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); SimpleReply()
+    case "persist"       =>
       val entry = db(payload.key)
       entry.expiry match {
         case Some((_, cancellable)) => cancellable.cancel(); entry.expiry = None; 1
         case None => 0
       }
-    case "sort"       =>
+    case "sort"          =>
       db(payload.key).nodeType match {
         case "list" | "set" | "sortedset" =>
           val sortArgs = Seq("_sort", payload.key) ++ payload.args
@@ -803,40 +859,59 @@ class ClientNode extends Node[Null] {
   var aggregateId = 0
   var db = payload.db
   val end = "\r\n"
+  var channels = mutable.Set[String]()
+  var patterns = mutable.Set[String]()
 
   def aggregate(props: Props): Unit = {
     aggregateId += 1
     context.actorOf(props, s"aggregate-${payload.command}-${aggregateId}") ! payload
   }
 
+  def subscribeOrUnsubscribe = {
+    val pattern = payload.command.head == 'p'
+    val subscribed = if (pattern) patterns else channels
+    val xs = if (args.isEmpty) subscribed.toSeq else args
+    xs.foreach {x => route(Seq("_" + payload.command, x), destination = payload.destination, broadcast = pattern)}
+  }
+
   def run = {
-    case "mset"        => argsPaired.foreach {args => route(Seq("set", args._1, args._2))}; SimpleReply()
-    case "msetnx"      => aggregate(Props[AggregateMSetNX])
-    case "mget"        => aggregate(Props[AggregateMGet])
-    case "bitop"       => aggregate(Props[AggregateBitOp])
-    case "dbsize"      => aggregate(Props[AggregateDBSize])
-    case "del"         => aggregate(Props[AggregateDel])
-    case "keys"        => aggregate(Props[AggregateKeys])
-    case "flushdb"     => aggregate(Props[AggregateFlushDB])
-    case "flushall"    => aggregate(Props[AggregateFlushAll])
-    case "pfcount"     => aggregate(Props[AggregateHyperLogLogCount])
-    case "pfmerge"     => aggregate(Props[AggregateHyperLogLogMerge])
-    case "randomkey"   => aggregate(Props[AggregateRandomKey])
-    case "scan"        => aggregate(Props[AggregateScan])
-    case "sdiff"       => aggregate(Props[AggregateSet])
-    case "sinter"      => aggregate(Props[AggregateSet])
-    case "sunion"      => aggregate(Props[AggregateSet])
-    case "sdiffstore"  => aggregate(Props[AggregateSetStore])
-    case "sinterstore" => aggregate(Props[AggregateSetStore])
-    case "sunionstore" => aggregate(Props[AggregateSetStore])
-    case "zinterstore" => aggregate(Props[AggregateSortedSetStore])
-    case "zunionstore" => aggregate(Props[AggregateSortedSetStore])
-    case "select"      => db = args(0); SimpleReply()
-    case "echo"        => args(0)
-    case "ping"        => SimpleReply("PONG")
-    case "time"        => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
-    case "shutdown"    => context.system.shutdown()
-    case "quit"        => quitting = true; SimpleReply()
+    case "mset"         => argsPaired.foreach {args => route(Seq("set", args._1, args._2))}; SimpleReply()
+    case "msetnx"       => aggregate(Props[AggregateMSetNX])
+    case "mget"         => aggregate(Props[AggregateMGet])
+    case "bitop"        => aggregate(Props[AggregateBitOp])
+    case "dbsize"       => aggregate(Props[AggregateDBSize])
+    case "del"          => aggregate(Props[AggregateDel])
+    case "keys"         => aggregate(Props[AggregateKeys])
+    case "flushdb"      => aggregate(Props[AggregateFlushDB])
+    case "flushall"     => aggregate(Props[AggregateFlushAll])
+    case "pfcount"      => aggregate(Props[AggregateHyperLogLogCount])
+    case "pfmerge"      => aggregate(Props[AggregateHyperLogLogMerge])
+    case "randomkey"    => aggregate(Props[AggregateRandomKey])
+    case "scan"         => aggregate(Props[AggregateScan])
+    case "sdiff"        => aggregate(Props[AggregateSet])
+    case "sinter"       => aggregate(Props[AggregateSet])
+    case "sunion"       => aggregate(Props[AggregateSet])
+    case "sdiffstore"   => aggregate(Props[AggregateSetStore])
+    case "sinterstore"  => aggregate(Props[AggregateSetStore])
+    case "sunionstore"  => aggregate(Props[AggregateSetStore])
+    case "zinterstore"  => aggregate(Props[AggregateSortedSetStore])
+    case "zunionstore"  => aggregate(Props[AggregateSortedSetStore])
+    case "select"       => db = args(0); SimpleReply()
+    case "echo"         => args(0)
+    case "ping"         => SimpleReply("PONG")
+    case "time"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
+    case "shutdown"     => context.system.shutdown()
+    case "quit"         => quitting = true; SimpleReply()
+    case "subscribe"    => subscribeOrUnsubscribe
+    case "unsubscribe"  => subscribeOrUnsubscribe
+    case "psubscribe"   => subscribeOrUnsubscribe
+    case "punsubscribe" => subscribeOrUnsubscribe
+    case "pubsub"       =>
+      args(0) match {
+        case "channels" => aggregate(Props[AggregatePubSubChannels])
+        case "numsub"   => aggregate(Props[AggregatePubSubNumSub])
+        case "numpat"   => route(Seq("_numpat", Random.alphanumeric.take(5)), destination = payload.destination)
+      }
   }
 
   def validate = {
@@ -900,7 +975,17 @@ class ClientNode extends Node[Null] {
             else route(clientPayload = Option(payload))
         }
       }
-    case Tcp.PeerClosed => context stop self
+    case Tcp.PeerClosed =>
+      channels.foreach {x => route(Seq("_unsubscribe", x), destination = Some(self))}
+      patterns.foreach {x => route(Seq("_punsubscribe", x), destination = Some(self), broadcast = true)}
+      context stop self
+    case PubSubEvent(event, channelOrPattern) =>
+      val current = if (event.head == 'p') patterns else channels
+      val subscribing = event.stripPrefix("p") == "subscribe"
+      val subscribed = subscribing && current.add(channelOrPattern)
+      val unsubscribed = !subscribing && current.remove(channelOrPattern)
+      if (subscribed || unsubscribed)
+        self ! Response(channelOrPattern, Seq(event, channelOrPattern, current.size.toString))
     case Response(_, response) => client.foreach {client =>
       client ! Tcp.Write(ByteString(writeOutput(response)))
       if (quitting) self ! Delete
@@ -909,8 +994,7 @@ class ClientNode extends Node[Null] {
 
 }
 
-abstract class Aggregate[T](val command: String)
-    extends Actor with PayloadProcessing with ActorLogging {
+abstract class Aggregate[T](val command: String) extends Actor with PayloadProcessing with ActorLogging {
 
   var responses = mutable.Map[String, T]()
 
@@ -1021,10 +1105,20 @@ class AggregateHyperLogLogMerge extends Aggregate[HLL]("_pfget") {
 }
 
 abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
-  lazy val broadcast = Broadcast(Payload(command +: broadcastArgs, db = payload.db, destination = Some(self)))
   def broadcastArgs = payload.args
   override def keys = (1 to context.system.settings.config.getInt("curiodb.keynodes")).map(_.toString)
-  override def begin = context.system.actorSelection("/user/keys") ! broadcast
+  override def begin = route(command +: broadcastArgs, destination = Some(self), broadcast = true)
+}
+
+class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_channels") {
+  override def broadcastArgs = Seq(if (args.size == 2) args(1) else "*")
+  override def complete = responses.values.reduce(_ ++ _)
+}
+
+class AggregatePubSubNumSub extends Aggregate[Int]("_numsub") {
+  override def keys = args.drop(1)
+  override def begin = if (keys.isEmpty) {respond(Seq()); context stop self} else super.begin
+  override def complete = keys.flatMap(x => Seq(x, responses(x).toString))
 }
 
 abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
