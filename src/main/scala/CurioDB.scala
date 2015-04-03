@@ -20,235 +20,66 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.math.{min, max}
 import scala.util.{Success, Failure, Random, Try}
 
-case class Spec(
-  args: Any = 0,
-  default: (Seq[String] => Any) = (_ => ()),
-  keyed: Boolean = true,
-  writes: Boolean = false,
-  overwrites: Boolean = false)
-
 case class Error(message: String = "syntax error", prefix: String = "ERR")
 
 case class SimpleReply(message: String = "OK")
 
 object Commands {
 
-  val many = Int.MaxValue - 1
-  val pairs = 2 to many by 2
+  val commands = mutable.Map[String, mutable.Map[String, mutable.Map[String, String]]]()
 
-  val error  = (_: Seq[String]) => Error("no such key")
-  val nil    = (_: Seq[String]) => null
-  val ok     = (_: Seq[String]) => SimpleReply()
-  val zero   = (_: Seq[String]) => 0
-  val neg1   = (_: Seq[String]) => -1
-  val neg2   = (_: Seq[String]) => -2
-  val nils   = (x: Seq[String]) => x.map(_ => nil)
-  val zeros  = (x: Seq[String]) => x.map(_ => zero)
-  val seq    = (_: Seq[String]) => Seq()
-  val string = (_: Seq[String]) => ""
-  val scan   = (_: Seq[String]) => Seq("0", "")
+  ConfigFactory.load("commands").getConfig("commands").entrySet.foreach {entry =>
+    val parts = entry.getKey.replace("\"", "").split('.')
+    commands.getOrElseUpdate(parts(0), mutable.Map[String, mutable.Map[String, String]]())
+    commands(parts(0)).getOrElseUpdate(parts(1), mutable.Map[String, String]())
+    commands(parts(0))(parts(1))(parts(2)) = entry.getValue.unwrapped.toString
+  }
 
-  val specs = Map(
+  def nodeSet(command: String) =
+    commands.find(_._2.contains(command))
 
-    "string" -> Map(
-      "append"       -> Spec(args = 1, writes = true),
-      "decr"         -> Spec(writes = true),
-      "decrby"       -> Spec(args = 1, writes = true),
-      "get"          -> Spec(default = nil),
-      "getrange"     -> Spec(args = 2, default = string),
-      "getset"       -> Spec(args = 1, writes = true),
-      "incr"         -> Spec(writes = true),
-      "incrby"       -> Spec(args = 1, writes = true),
-      "incrbyfloat"  -> Spec(args = 1, writes = true),
-      "psetex"       -> Spec(args = 2, overwrites = true),
-      "set"          -> Spec(args = 1 to 4, overwrites = true),
-      "setex"        -> Spec(args = 2, overwrites = true),
-      "setnx"        -> Spec(args = 1, default = zero, writes = true),
-      "setrange"     -> Spec(args = 2, writes = true),
-      "strlen"       -> Spec(default = zero)
-    ),
+  def nodeType(command: String) =
+    nodeSet(command).map(_._1).getOrElse("")
 
-    "hash" -> Map(
-      "_rename"      -> Spec(args = 1),
-      "_hstore"      -> Spec(args = pairs, overwrites = true),
-      "hdel"         -> Spec(args = 1 to many, default = zeros, writes = true),
-      "hexists"      -> Spec(args = 1, default = zero),
-      "hget"         -> Spec(args = 1, default = nil),
-      "hgetall"      -> Spec(default = seq),
-      "hincrby"      -> Spec(args = 2, writes = true),
-      "hincrbyfloat" -> Spec(args = 2, writes = true),
-      "hkeys"        -> Spec(default = seq),
-      "hlen"         -> Spec(default = zero),
-      "hmget"        -> Spec(args = 1 to many, default = nils),
-      "hmset"        -> Spec(args = pairs, writes = true),
-      "hscan"        -> Spec(args = 1 to 3, default = scan),
-      "hset"         -> Spec(args = 2, writes = true),
-      "hsetnx"       -> Spec(args = 2, writes = true),
-      "hvals"        -> Spec(default = seq)
-    ),
+  def attr(command: String, name: String, default: String) =
+    nodeSet(command).get._2(command).getOrElse(name, default)
 
-    "list" -> Map(
-      "_rename"      -> Spec(args = 1),
-      "_lstore"      -> Spec(args = 0 to many, overwrites = true),
-      "_sort"        -> Spec(args = 0 to many),
-      "blpop"        -> Spec(args = 1 to many, default = nil, writes = true),
-      "brpop"        -> Spec(args = 1 to many, default = nil, writes = true),
-      "brpoplpush"   -> Spec(args = 2, default = nil, writes = true),
-      "lindex"       -> Spec(args = 1, default = nil),
-      "linsert"      -> Spec(args = 3, default = zero, writes = true),
-      "llen"         -> Spec(default = zero),
-      "lpop"         -> Spec(default = nil, writes = true),
-      "lpush"        -> Spec(args = 1 to many, writes = true),
-      "lpushx"       -> Spec(args = 1, default = zero, writes = true),
-      "lrange"       -> Spec(args = 2, default = seq),
-      "lrem"         -> Spec(args = 2, default = zero),
-      "lset"         -> Spec(args = 2, default = error, writes = true),
-      "ltrim"        -> Spec(args = 2, default = ok),
-      "rpop"         -> Spec(default = nil, writes = true),
-      "rpoplpush"    -> Spec(args = 1, default = nil, writes = true),
-      "rpush"        -> Spec(args = 1 to many, writes = true),
-      "rpushx"       -> Spec(args = 1, default = zero, writes = true)
-    ),
+  def keyed(command: String) =
+    attr(command, "keyed", "") != "false"
 
-    "set" -> Map(
-      "_rename"      -> Spec(args = 1),
-      "_sstore"      -> Spec(args = 0 to many, overwrites = true),
-      "_sort"        -> Spec(args = 0 to many),
-      "sadd"         -> Spec(args = 1 to many, writes = true),
-      "scard"        -> Spec(default = zero),
-      "sismember"    -> Spec(args = 1, default = zero),
-      "smembers"     -> Spec(default = seq),
-      "smove"        -> Spec(args = 2, default = error, writes = true),
-      "spop"         -> Spec(default = nil, writes = true),
-      "srandmember"  -> Spec(args = 0 to 1, default = nil),
-      "srem"         -> Spec(args = 1 to many, default = zero, writes = true),
-      "sscan"        -> Spec(args = 1 to 3, default = scan)
-    ),
+  def writes(command: String) =
+    attr(command, "writes", "") == "true" || overwrites(command)
 
-    "sortedset" -> Map(
-      "_rename"          -> Spec(args = 1),
-      "_zstore"          -> Spec(args = 0 to many, overwrites = true),
-      "_zget"            -> Spec(default = seq),
-      "_sort"            -> Spec(args = 0 to many),
-      "zadd"             -> Spec(args = pairs, writes = true),
-      "zcard"            -> Spec(default = zero),
-      "zcount"           -> Spec(args = 2, default = zero),
-      "zincrby"          -> Spec(args = 2, writes = true),
-      "zlexcount"        -> Spec(args = 2, default = zero),
-      "zrange"           -> Spec(args = 2 to 3, default = seq),
-      "zrangebylex"      -> Spec(args = 2 to 5, default = seq),
-      "zrangebyscore"    -> Spec(args = 2 to 6, default = seq),
-      "zrank"            -> Spec(args = 1, default = nil),
-      "zrem"             -> Spec(args = 1 to many, default = zero, writes = true),
-      "zremrangebylex"   -> Spec(args = 2, writes = true),
-      "zremrangebyrank"  -> Spec(args = 2, writes = true),
-      "zremrangebyscore" -> Spec(args = 2, writes = true),
-      "zrevrange"        -> Spec(args = 2 to 3, default = seq),
-      "zrevrangebylex"   -> Spec(args = 2 to 5, default = seq),
-      "zrevrangebyscore" -> Spec(args = 2 to 6, default = seq),
-      "zrevrank"         -> Spec(args = 1, default = nil),
-      "zscan"            -> Spec(args = 1 to 3, default = scan),
-      "zscore"           -> Spec(args = 1, default = nil)
-    ),
+  def overwrites(command: String) =
+    attr(command, "overwrites", "") == "true"
 
-    "bitmap" -> Map(
-      "_rename"      -> Spec(args = 1),
-      "_bstore"      -> Spec(args = 0 to many, overwrites = true),
-      "_bget"        -> Spec(default = seq),
-      "setbit"       -> Spec(args = 2, writes = true),
-      "bitcount"     -> Spec(args = 0 to 2, default = zero),
-      "bitpos"       -> Spec(args = 1 to 3, default = (args: Seq[String]) => -args(0).toInt),
-      "getbit"       -> Spec(args = 1, default = zero)
-    ),
+  def default(command: String, args: Seq[String]) =
+    attr(command, "default", "unit") match {
+      case "string" => ""
+      case "ok"     => SimpleReply()
+      case "error"  => Error("no such key")
+      case "nil"    => null
+      case "zero"   => 0
+      case "neg1"   => -1
+      case "neg2"   => -2
+      case "seq"    => Seq()
+      case "scan"   => Seq("0", "")
+      case "nils"   => args.map(_ => null)
+      case "zeros"  => args.map(_ => 0)
+      case "unit"   => ()
+    }
 
-    "hyperloglog" -> Map(
-      "_rename"     -> Spec(args = 1),
-      "_pfstore"    -> Spec(args = 0 to many, overwrites = true),
-      "_pfget"      -> Spec(default = seq),
-      "_pfcount"    -> Spec(default = zero),
-      "pfadd"       -> Spec(args = 1 to many, writes = true)
-    ),
-
-    "keys" -> Map(
-      "_del"          -> Spec(default = nil, writes = true),
-      "_keys"         -> Spec(args = 0 to 1, keyed = false),
-      "_randomkey"    -> Spec(keyed = false),
-      "_flushdb"      -> Spec(keyed = false),
-      "_flushall"     -> Spec(keyed = false),
-      "_subscribe"    -> Spec(),
-      "_unsubscribe"  -> Spec(),
-      "_psubscribe"   -> Spec(keyed = false),
-      "_punsubscribe" -> Spec(keyed = false),
-      "_channels"     -> Spec(args = 1, keyed = false),
-      "_numsub"       -> Spec(),
-      "_numpat"       -> Spec(),
-      "exists"        -> Spec(args = 1 to many, keyed = false),
-      "expire"        -> Spec(args = 1, default = zero),
-      "expireat"      -> Spec(args = 1, default = zero),
-      "persist"       -> Spec(default = zero),
-      "pexpire"       -> Spec(args = 1, default = zero),
-      "pexpireat"     -> Spec(args = 1, default = zero),
-      "pttl"          -> Spec(default = neg2),
-      "rename"        -> Spec(args = 1, default = error),
-      "renamenx"      -> Spec(args = 1, default = error),
-      "sort"          -> Spec(args = 0 to many, default = seq),
-      "publish"       -> Spec(args = 1),
-      "ttl"           -> Spec(default = neg2),
-      "type"          -> Spec()
-    ),
-
-    "client" -> Map(
-      "bitop"        -> Spec(args = 3 to many, keyed = false),
-      "dbsize"       -> Spec(keyed = false),
-      "del"          -> Spec(args = 1 to many, keyed = false),
-      "echo"         -> Spec(args = 1, keyed = false),
-      "flushdb"      -> Spec(keyed = false),
-      "flushall"     -> Spec(keyed = false),
-      "keys"         -> Spec(args = 1, keyed = false),
-      "mget"         -> Spec(args = 1 to many, keyed = false),
-      "mset"         -> Spec(args = pairs, keyed = false),
-      "msetnx"       -> Spec(args = pairs, keyed = false),
-      "ping"         -> Spec(keyed = false),
-      "quit"         -> Spec(keyed = false),
-      "randomkey"    -> Spec(keyed = false),
-      "pfcount"      -> Spec(args = 1 to many, keyed = false),
-      "pfmerge"      -> Spec(args = 2 to many),
-      "pubsub"       -> Spec(args = 1 to many, keyed = false),
-      "subscribe"    -> Spec(args = 1 to many, keyed = false),
-      "unsubscribe"  -> Spec(args = 0 to many, keyed = false),
-      "psubscribe"   -> Spec(args = 1 to many, keyed = false),
-      "punsubscribe" -> Spec(args = 0 to many, keyed = false),
-      "scan"         -> Spec(args = 1 to 3, keyed = false),
-      "shutdown"     -> Spec(args = 0 to 1, keyed = false),
-      "sdiff"        -> Spec(args = 0 to many, keyed = false),
-      "sdiffstore"   -> Spec(args = 1 to many),
-      "select"       -> Spec(args = 1, keyed = false),
-      "sinter"       -> Spec(args = 0 to many, keyed = false),
-      "sinterstore"  -> Spec(args = 1 to many),
-      "sunion"       -> Spec(args = 0 to many, keyed = false),
-      "sunionstore"  -> Spec(args = 1 to many),
-      "time"         -> Spec(keyed = false),
-      "zinterstore"  -> Spec(args = 2 to many),
-      "zunionstore"  -> Spec(args = 2 to many)
-    )
-
-  )
-
-  def get(command: String) = specs.find(_._2.contains(command)).getOrElse(("", Map[String, Spec]()))
-
-  def default(command: String, args: Seq[String]) = get(command)._2(command).default(args)
-
-  def keyed(command: String): Boolean = get(command)._2(command).keyed
-
-  def writes(command: String): Boolean = get(command)._2(command).writes || overwrites(command)
-
-  def overwrites(command: String): Boolean = get(command)._2(command).overwrites
-
-  def nodeType(command: String) = get(command)._1
-
-  def argsInRange(command: String, args: Seq[String]) = get(command)._2(command).args match {
-    case fixed: Int => args.size == fixed
-    case range: Range => range.contains(args.size)
+  def argsInRange(command: String, args: Seq[String]) = {
+    val parts = attr(command, "args", "0").split('-')
+    val pairs = parts(0) == "pairs"
+    if (parts.size == 1 && !pairs)
+      args.size == parts(0).toInt
+    else {
+      val start = if (pairs) 2 else parts(0).toInt
+      val stop = if (pairs || parts(1) == "many") Int.MaxValue - 1 else parts(1).toInt
+      val step = if (pairs) 2 else 1
+      (start to stop by step).contains(args.size)
+    }
   }
 
 }
@@ -941,7 +772,7 @@ class ClientNode extends Node[Null] {
         case '-'|'+'|':' => Seq(part.tail)
         case '$'         => Seq(next(part.tail.toInt))
         case '*'         => (1 to part.tail.toInt).map(_ => parts.head)
-        case _           => part.split(" ")
+        case _           => part.split(' ')
       }
     }
 
