@@ -804,9 +804,8 @@ class ClientNode extends Node[Null] {
       None
   }
 
-  def parseInput(received: String): Seq[String] = {
+  def parseInput: Seq[String] = {
 
-    buffer.append(received)
     var pos = 0
 
     def next(length: Int = 0): String = {
@@ -828,7 +827,7 @@ class ClientNode extends Node[Null] {
     }
 
     Try(parts) match {
-      case Success(output) => buffer.clear; output
+      case Success(output) => buffer.delete(0, pos); output
       case Failure(_)      => Seq[String]()
     }
 
@@ -847,8 +846,9 @@ class ClientNode extends Node[Null] {
   override def receiveCommand: Receive = ({
 
     case Tcp.Received(data) =>
-      val input = parseInput(data.utf8String)
-      if (input.size > 0) {
+      var input = Seq[String]()
+      buffer.append(data.utf8String)
+      while ({input = parseInput; input.size > 0}) {
         payload = Payload(input, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
