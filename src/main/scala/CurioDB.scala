@@ -15,49 +15,54 @@ import java.net.{InetSocketAddress, URI}
 import net.agkn.hll.HLL
 import scala.collection.JavaConversions._
 import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.Await
+import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.language.postfixOps
 import scala.math.{min, max}
 import scala.util.{Success, Failure, Random, Try}
 
-case class Error(message: String = "syntax error", prefix: String = "ERR")
+case class ErrorReply(message: String = "syntax error", prefix: String = "ERR")
 
 case class SimpleReply(message: String = "OK")
 
 object Commands {
 
-  val commands = mutable.Map[String, mutable.Map[String, mutable.Map[String, String]]]()
+  type CommandSet = mutable.Map[String, mutable.Map[String, String]]
+  val commands = mutable.Map[String, CommandSet]()
 
-  ConfigFactory.load("commands").getConfig("commands").entrySet.foreach {entry =>
+  ConfigFactory.load("commands.conf").getConfig("commands").entrySet.foreach {entry =>
     val parts = entry.getKey.replace("\"", "").split('.')
     commands.getOrElseUpdate(parts(0), mutable.Map[String, mutable.Map[String, String]]())
     commands(parts(0)).getOrElseUpdate(parts(1), mutable.Map[String, String]())
     commands(parts(0))(parts(1))(parts(2)) = entry.getValue.unwrapped.toString
   }
 
-  def nodeSet(command: String) =
+  def commandSet(command: String): Option[(String, CommandSet)] =
     commands.find(_._2.contains(command))
 
-  def nodeType(command: String) =
-    nodeSet(command).map(_._1).getOrElse("")
+  def nodeType(command: String): String =
+    commandSet(command).map(_._1).getOrElse("")
 
-  def attr(command: String, name: String, default: String) =
-    nodeSet(command).get._2(command).getOrElse(name, default)
+  def attr(command: String, name: String, default: String): String = commandSet(command).map(_._2) match {
+    case Some(set) => set.getOrElse(command, Map[String, String]()).getOrElse(name, default)
+    case None => default
+  }
 
-  def keyed(command: String) =
-    attr(command, "keyed", "") != "false"
+  def keyed(command: String): Boolean =
+    attr(command, "keyed", "true") != "false"
 
-  def writes(command: String) =
-    attr(command, "writes", "") == "true" || overwrites(command)
+  def writes(command: String): Boolean =
+    attr(command, "writes", "false") == "true" || overwrites(command)
 
-  def overwrites(command: String) =
-    attr(command, "overwrites", "") == "true"
+  def overwrites(command: String): Boolean =
+    attr(command, "overwrites", "false") == "true"
 
-  def default(command: String, args: Seq[String]) =
-    attr(command, "default", "unit") match {
+  def default(command: String, args: Seq[String]): Any =
+    attr(command, "default", "none") match {
       case "string" => ""
       case "ok"     => SimpleReply()
-      case "error"  => Error("no such key")
+      case "error"  => ErrorReply("no such key")
       case "nil"    => null
       case "zero"   => 0
       case "neg1"   => -1
@@ -66,15 +71,15 @@ object Commands {
       case "scan"   => Seq("0", "")
       case "nils"   => args.map(_ => null)
       case "zeros"  => args.map(_ => 0)
-      case "unit"   => ()
+      case "none"   => ()
     }
 
-  def argsInRange(command: String, args: Seq[String]) = {
+  def argsInRange(command: String, args: Seq[String]): Boolean = {
     val parts = attr(command, "args", "0").split('-')
     val pairs = parts(0) == "pairs"
-    if (parts.size == 1 && !pairs)
+    if (parts.size == 1 && !pairs) {
       args.size == parts(0).toInt
-    else {
+    } else {
       val start = if (pairs) 2 else parts(0).toInt
       val stop = if (pairs || parts(1) == "many") Int.MaxValue - 1 else parts(1).toInt
       val step = if (pairs) 2 else 1
@@ -93,7 +98,7 @@ case class Payload(input: Seq[Any] = Seq(), db: String = "0", destination: Optio
   lazy val argsUpper = args.map(_.toUpperCase)
 }
 
-case class Unrouted(payload: Payload) extends ConsistentHashable {
+case class Routable(payload: Payload) extends ConsistentHashable {
   override def consistentHashKey: Any = payload.key
 }
 
@@ -103,37 +108,38 @@ trait PayloadProcessing extends Actor {
 
   var payload = Payload()
 
-  def args = payload.args
+  def args: Seq[String] = payload.args
 
-  def argsPaired = payload.argsPaired
+  def argsPaired: Seq[(String, String)] = payload.argsPaired
 
-  def argsUpper = payload.argsUpper
+  def argsUpper: Seq[String] = payload.argsUpper
 
   def route(
       input: Seq[Any] = Seq(),
       destination: Option[ActorRef] = None,
       clientPayload: Option[Payload] = None,
-      broadcast: Boolean = false) = {
+      broadcast: Boolean = false): Unit = {
 
+    val keys = context.system.actorSelection("/user/keys")
     val p = clientPayload match {
       case Some(payload) => payload
       case None => Payload(input, payload.db, destination)
     }
-    val keys = context.system.actorSelection("/user/keys")
 
-    if (broadcast) keys ! Broadcast(p) else keys ! Unrouted(p)
+    if (broadcast) keys ! Broadcast(p) else keys ! Routable(p)
 
   }
 
-  def respond(response: Any) = if (response != ()) payload.destination.foreach {destination =>
-    destination ! Response(payload.key, response)
-  }
+  def respond(response: Any): Unit =
+    if (response != ()) {
+      payload.destination.foreach {d => d ! Response(payload.key, response)}
+    }
 
-  def randomItem(iterable: Iterable[String]) = {
+  def randomItem(iterable: Iterable[String]): String = {
     if (iterable.isEmpty) "" else iterable.toSeq(Random.nextInt(iterable.size))
   }
 
-  def pattern(values: Iterable[String], pattern: String) = {
+  def pattern(values: Iterable[String], pattern: String): Iterable[String] = {
     val regex = ("^" + pattern.map {
       case '.'|'('|')'|'+'|'|'|'^'|'$'|'@'|'%'|'\\' => "\\" + _
       case '*' => ".*"
@@ -143,7 +149,7 @@ trait PayloadProcessing extends Actor {
     values.filter(regex.pattern.matcher(_).matches)
   }
 
-  def scan(values: Iterable[String]) = {
+  def scan(values: Iterable[String]): Seq[String] = {
     val count = if (args.size >= 3) args(2).toInt else 10
     val start = if (args.size >= 1) args(0).toInt else 0
     val end = start + count
@@ -152,7 +158,7 @@ trait PayloadProcessing extends Actor {
     Seq(next.toString) ++ filtered.slice(start, end)
   }
 
-  def bounds(from: Int, to: Int, size: Int) =
+  def bounds(from: Int, to: Int, size: Int): (Int, Int) =
     (if (from < 0) size + from else from, if (to < 0) size + to else to)
 
   def slice[T](value: Seq[T]): Seq[T] = {
@@ -162,9 +168,9 @@ trait PayloadProcessing extends Actor {
 
 }
 
-case class Persist extends ControlMessage
+case object Persist extends ControlMessage
 
-case class Delete extends ControlMessage
+case object Delete extends ControlMessage
 
 abstract class Node[T] extends PersistentActor with PayloadProcessing with ActorLogging {
 
@@ -177,25 +183,25 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   def run: Run
 
-  def persistenceId = self.path.name
+  def persistenceId: String = self.path.name
 
-  def save = {
-    if (persistAfter == 0) saveSnapshot(value)
-    else if (persistAfter > 0 && !persisting) {
+  def save: Unit = {
+    if (persistAfter == 0) {
+      saveSnapshot(value)
+    } else if (persistAfter > 0 && !persisting) {
       persisting = true
-      context.system.scheduler.scheduleOnce(persistAfter milliseconds) {
-        self ! Persist
-      }
+      context.system.scheduler.scheduleOnce(persistAfter milliseconds) {self ! Persist}
     }
   }
 
-  def deleteOldSnapshots(stopping: Boolean = false) =
-    if (persistAfter >= 0)
+  def deleteOldSnapshots(stopping: Boolean = false): Unit =
+    if (persistAfter >= 0) {
       lastSnapshot.foreach {meta =>
         val criteria = if (stopping) SnapshotSelectionCriteria()
-        else SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
+          else SnapshotSelectionCriteria(meta.sequenceNr, meta.timestamp - 1)
         deleteSnapshots(criteria)
       }
+    }
 
   override def receiveRecover: Receive = {
     case SnapshotOffer(meta, snapshot) =>
@@ -206,25 +212,26 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
   def receiveCommand: Receive = {
     case SaveSnapshotSuccess(meta) => lastSnapshot = Some(meta); deleteOldSnapshots()
     case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
-    case Persist => persisting = false; saveSnapshot(value)
-    case Delete => deleteOldSnapshots(stopping = true); context stop self
+    case Persist    => persisting = false; saveSnapshot(value)
+    case Delete     => deleteOldSnapshots(stopping = true); context stop self
     case p: Payload =>
       payload = p
       respond(Try(run(payload.command)) match {
         case Success(response) => if (Commands.writes(payload.command)) save; response
-        case Failure(e) => log.error(e, s"Error running: $payload"); Error
+        case Failure(e) => log.error(e, s"Error running: $payload"); ErrorReply
       })
   }
 
-  override def receive = LoggingReceive(super.receive)
+  override def receive: Receive = LoggingReceive(super.receive)
 
-  def rename(fromValue: Any, toCommand: String) = if (payload.key != args(0)) {
-    route(Seq("_del", payload.key))
-    route(Seq(toCommand, args(0)) ++ (fromValue match {
-      case x: Iterable[Any] => x
-      case x => Seq(x)
-    }))
-  }
+  def rename(fromValue: Any, toCommand: String): Unit =
+    if (payload.key != args(0)) {
+      route(Seq("_del", payload.key))
+      route(Seq(toCommand, args(0)) ++ (fromValue match {
+        case x: Iterable[Any] => x
+        case x => Seq(x)
+      }))
+    }
 
   def sort(values: Iterable[String]): Any = {
     // TODO: BY/GET support.
@@ -233,8 +240,10 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     val limit = argsUpper.indexOf("LIMIT")
     if (limit > -1) sorted = sorted.slice(args(limit + 1).toInt, args(limit + 2).toInt)
     val store = argsUpper.indexOf("STORE")
-    if (store > -1) {route(Seq("_lstore", args(store + 1)) ++ sorted); sorted.size}
-    else sorted
+    if (store > -1) {
+      route(Seq("_lstore", args(store + 1)) ++ sorted)
+      sorted.size
+    } else sorted
   }
 
 }
@@ -243,11 +252,11 @@ class StringNode extends Node[String] {
 
   var value = ""
 
-  def valueOrZero = if (value == "") "0" else value
+  def valueOrZero: String = if (value == "") "0" else value
 
-  def expire(command: String) = route(Seq(command, payload.key, args(1)))
+  def expire(command: String): Unit = route(Seq(command, payload.key, args(1)))
 
-  def run = {
+  def run: Run = {
     case "_rename"     => rename(value, "set")
     case "get"         => value
     case "set"         => value = args(0); SimpleReply()
@@ -272,25 +281,30 @@ class BitmapNode extends Node[mutable.BitSet] {
 
   var value = mutable.BitSet()
 
-  def last = value.lastOption.getOrElse(0)
+  def last: Int = value.lastOption.getOrElse(0)
 
-  def run = {
-    case "_rename"     => rename(value, "_bstore")
-    case "_bstore"     => value.clear; value ++= args.map(_.toInt); last / 8 + (if (value.isEmpty) 0 else 1)
-    case "_bget"       => value
-    case "bitcount"    => value.size
-    case "getbit"      => value(args(0).toInt)
-    case "setbit"      => val x = run("getbit"); value(args(0).toInt) = args(1) == "1"; x
-    case "bitpos"      =>
-      var x = value
-      if (args.size > 1) {
-        val (from, to) = bounds(args(1).toInt, if (args.size == 3) args(2).toInt else last, last + 1)
-        x = x.range(from, to + 1)
-      }
-      if (args(0) == "1") x.headOption.getOrElse(-1)
-      else (0 to x.lastOption.getOrElse(-1)).collectFirst({
+  def bitPos: Int = {
+    var x = value
+    if (args.size > 1) {
+      val (from, to) = bounds(args(1).toInt, if (args.size == 3) args(2).toInt else last, last + 1)
+      x = x.range(from, to + 1)
+    }
+    if (args(0) == "1")
+      x.headOption.getOrElse(-1)
+    else
+      (0 to x.lastOption.getOrElse(-1)).collectFirst({
         case i: Int if !x.contains(i) => i
       }).getOrElse(if (args.size > 1 && value.size > 1) -1 else 0)
+  }
+
+  def run: Run = {
+    case "_rename"  => rename(value, "_bstore")
+    case "_bstore"  => value.clear; value ++= args.map(_.toInt); last / 8 + (if (value.isEmpty) 0 else 1)
+    case "_bget"    => value
+    case "bitcount" => value.size
+    case "getbit"   => value(args(0).toInt)
+    case "setbit"   => val x = run("getbit"); value(args(0).toInt) = args(1) == "1"; x
+    case "bitpos"   => bitPos
   }
 
 }
@@ -302,15 +316,18 @@ class HyperLogLogNode extends Node[HLL] {
     context.system.settings.config.getInt("curiodb.hyperloglog.register-width")
   )
 
-  def run = {
+  def add: Int = {
+    val x = value.cardinality
+    args.foreach {x => value.addRaw(x.hashCode.toLong)}
+    if (x == value.cardinality) 0 else 1
+  }
+
+  def run: Run = {
     case "_rename"  => rename(value.toBytes.map(_.toString), "_pfstore")
     case "_pfcount" => value.cardinality.toInt
     case "_pfstore" => value.clear(); value = HLL.fromBytes(args.map(_.toByte).toArray); SimpleReply()
     case "_pfget"   => value
-    case "pfadd"    =>
-      val x = value.cardinality
-      args.foreach {x => value.addRaw(x.hashCode.toLong)}
-      if (x == value.cardinality) 0 else 1
+    case "pfadd"    => add
   }
 
 }
@@ -319,9 +336,9 @@ class HashNode extends Node[mutable.Map[String, String]] {
 
   var value = mutable.Map[String, String]()
 
-  def set(arg: Any) = {val x = arg.toString; value(args(0)) = x; x}
+  def set(arg: Any): String = {val x = arg.toString; value(args(0)) = x; x}
 
-  override def run = {
+  override def run: Run = {
     case "_rename"      => rename(run("hgetall"), "_hstore")
     case "_hstore"      => value.clear; run("hmset")
     case "hkeys"        => value.keys
@@ -353,11 +370,12 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= payload
         respond(null)
-      }; ()
+      }
+      ()
     } else run(payload.command.tail)
   }
 
-  def unblock(result: Any) = {
+  def unblock(result: Any): Any = {
     while (value.size > 0 && blocked.size > 0) {
       payload = blocked.head
       blocked -= payload
@@ -366,7 +384,15 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
     result
   }
 
-  def run = ({
+  def insert: Int = {
+    val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
+    if (i >= 0) {
+      value.insert(i, args(2))
+      value.size
+    } else -1
+  }
+
+  def run: Run = ({
     case "_rename"    => rename(value, "_lstore")
     case "_lstore"    => value.clear; run("rpush")
     case "_sort"      => sort(value)
@@ -386,9 +412,7 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
     case "brpop"      => block
     case "brpoplpush" => block
     case "rpoplpush"  => val x = run("rpop"); route("lpush" +: args :+ x.toString); x
-    case "linsert"    =>
-      val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
-      if (i >= 0) {value.insert(i, args(2)); respond(run("llen"))} else -1
+    case "linsert"    => insert
   }: Run) andThen unblock
 
 }
@@ -397,7 +421,7 @@ class SetNode extends Node[mutable.Set[String]] {
 
   var value = mutable.Set[String]()
 
-  def run = {
+  def run: Run = {
     case "_rename"     => rename(value, "_sstore")
     case "_sstore"     => value.clear; run("sadd")
     case "_sort"       => sort(value)
@@ -416,36 +440,42 @@ class SetNode extends Node[mutable.Set[String]] {
 
 case class SortedSetEntry(score: Int, key: String = "")(implicit ordering: Ordering[(Int, String)])
     extends Ordered[SortedSetEntry] {
-  def compare(that: SortedSetEntry) = ordering.compare((this.score, this.key), (that.score, that.key))
+  def compare(that: SortedSetEntry): Int =
+    ordering.compare((this.score, this.key), (that.score, that.key))
 }
 
 class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[SortedSetEntry])] {
 
   var value = (new IndexedTreeMap[String, Int](), new IndexedTreeSet[SortedSetEntry]())
 
-  def keys = value._1
+  def keys: IndexedTreeMap[String, Int] = value._1
 
-  def scores = value._2
+  def scores: IndexedTreeSet[SortedSetEntry] = value._2
 
-  def add(score: Int, key: String) = {
+  def add(score: Int, key: String): Boolean = {
     val exists = remove(key)
-    keys.put(key, score); scores.add(SortedSetEntry(score, key))
+    keys.put(key, score)
+    scores.add(SortedSetEntry(score, key))
     !exists
   }
 
-  def remove(key: String) = {
+  def remove(key: String): Boolean = {
     val exists = keys.containsKey(key)
-    if (exists) {scores.remove(SortedSetEntry(keys.get(key), key)); keys.remove(key)}
+    if (exists) {
+      scores.remove(SortedSetEntry(keys.get(key), key))
+      keys.remove(key)
+    }
     exists
   }
 
-  def increment(key: String, by: Int) = {
+  def increment(key: String, by: Int): Int = {
     val score = (if (keys.containsKey(key)) keys.get(key) else 0) + by
-    remove(key); add(score, key)
+    remove(key)
+    add(score, key)
     score
   }
 
-  def rank(key: String, reverse: Boolean = false) = {
+  def rank(key: String, reverse: Boolean = false): Int = {
     val index = scores.entryIndex(SortedSetEntry(keys.get(key), key))
     if (reverse) keys.size - index else index
   }
@@ -454,11 +484,13 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     if (from.score > to.score) return Seq()
     var result = scores.subSet(from, true, to, true).toSeq
     result = limit[SortedSetEntry](if (reverse) result.reverse else result)
-    if (argsUpper.contains("WITHSCORES")) result.flatMap(x => Seq(x.key, x.score.toString))
-    else result.map(_.key)
+    if (argsUpper.contains("WITHSCORES"))
+      result.flatMap(x => Seq(x.key, x.score.toString))
+    else
+      result.map(_.key)
   }
 
-  def rangeByIndex(from: String, to: String, reverse: Boolean = false) = {
+  def rangeByIndex(from: String, to: String, reverse: Boolean = false): Seq[String] = {
     var (fromIndex, toIndex) = bounds(from.toInt, to.toInt, keys.size)
     if (reverse) {
       fromIndex = keys.size - fromIndex - 1
@@ -467,7 +499,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     range(scores.exact(fromIndex), scores.exact(toIndex), reverse)
   }
 
-  def rangeByScore(from: String, to: String, reverse: Boolean = false) = {
+  def rangeByScore(from: String, to: String, reverse: Boolean = false): Seq[String] = {
     def parse(arg: String, dir: Int) = arg match {
       case "-inf" => if (scores.isEmpty) 0 else scores.first().score
       case "+inf" => if (scores.isEmpty) 0 else scores.last().score
@@ -489,13 +521,15 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     limit[(String, Int)](if (reverse) result.reverse else result).map(_._1)
   }
 
-  def limit[T](values: Seq[T]) = {
+  def limit[T](values: Seq[T]): Seq[T] = {
     val i = argsUpper.indexOf("LIMIT")
-    if (i > 1) values.slice(args(i + 1).toInt, args(i + 1).toInt + args(i + 2).toInt)
-    else values
+    if (i > 1)
+      values.slice(args(i + 1).toInt, args(i + 1).toInt + args(i + 2).toInt)
+    else
+      values
   }
 
-  def run = {
+  def run: Run = {
     case "_rename"          => rename(scores.flatMap(x => Seq(x.score, x.key)), "_zstore")
     case "_zstore"          => keys.clear; scores.clear; run("zadd")
     case "_zget"            => keys
@@ -534,17 +568,27 @@ case class PubSubEvent(event: String, channelOrPattern: String)
 
 class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] {
 
-  var value = mutable.Map[String, mutable.Map[String, NodeEntry]]()
-  val wrongType = Error("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
+  type DB = mutable.Map[String, NodeEntry]
+  var value = mutable.Map[String, DB]()
+  val wrongType = ErrorReply("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
   val channels = mutable.Map[String, mutable.Set[ActorRef]]()
   val patterns = mutable.Map[String, mutable.Set[ActorRef]]()
 
-  def dbFor(name: String) = value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
+  def dbFor(name: String): DB =
+    value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
 
-  def db = dbFor(payload.db)
+  def db: DB = dbFor(payload.db)
+
+  def persist: Int = db(payload.key).expiry match {
+    case Some((_, cancellable)) =>
+      cancellable.cancel()
+      db(payload.key).expiry = None
+      1
+    case None => 0
+  }
 
   def expire(when: Long): Int = {
-    run("persist")
+    persist
     val expires = (when - System.currentTimeMillis).toInt milliseconds
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
       self ! Payload(Seq("_del", payload.key), db = payload.db)
@@ -553,34 +597,73 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     1
   }
 
-  def ttl = db(payload.key).expiry match {
+  def ttl: Long = db(payload.key).expiry match {
     case Some((when, _)) => when - System.currentTimeMillis
     case None => -1
   }
 
-  def validate = {
+  def sort: Any = db(payload.key).nodeType match {
+    case "list" | "set" | "sortedset" =>
+      val sortArgs = Seq("_sort", payload.key) ++ payload.args
+      db(payload.key).node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
+    case _ => wrongType
+  }
+
+  def subscribeOrUnsubscribe: Unit = {
+    val pattern = payload.command.startsWith("_p")
+    val current = if (pattern) patterns else channels
+    val key = if (pattern) args(0) else payload.key
+    val subscriber = payload.destination.get
+    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "subscribe"
+    val updated = if (subscribing)
+      current.getOrElseUpdate(key, mutable.Set[ActorRef]()).add(subscriber)
+    else
+      !current.get(key).filter(_.remove(subscriber)).isEmpty
+    if (!subscribing && updated && current(key).isEmpty) current -= key
+    if (updated) subscriber ! PubSubEvent(payload.command.tail, key)
+  }
+
+  def publish: Int = {
+    channels.get(payload.key).map({subscribers =>
+      val message = Response(payload.key, Seq("message", payload.key, args(0)))
+      subscribers.foreach(_ ! message)
+      subscribers.size
+    }).sum + patterns.filterKeys(!pattern(Seq(payload.key), _).isEmpty).map({entry =>
+      val message = Response(payload.key, Seq("pmessage", entry._1, payload.key, args(0)))
+      entry._2.foreach(_ ! message)
+      entry._2.size
+    }).sum
+  }
+
+  def validate: Option[Any] = {
     val exists      = db.contains(payload.key)
     val nodeType    = if (exists) db(payload.key).nodeType else ""
-    val invalidType = nodeType != "" && payload.nodeType != nodeType &&
-      payload.nodeType != "keys" && !Commands.overwrites(payload.command)
+    val invalidType = (nodeType != "" && payload.nodeType != nodeType &&
+      payload.nodeType != "keys" && !Commands.overwrites(payload.command))
     val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
     val mustExist   = payload.command == "setnx"
     val default     = Commands.default(payload.command, payload.args)
-    if (invalidType) Some(wrongType)
-    else if ((exists && cantExist) || (!exists && mustExist)) Some("0")
-    else if (!exists && default != ()) Some(default)
-    else None
+    if (invalidType)
+      Some(wrongType)
+    else if ((exists && cantExist) || (!exists && mustExist))
+      Some(0)
+    else if (!exists && default != ())
+      Some(default)
+    else
+      None
   }
 
-  def node = {
-    if (payload.nodeType == "keys") self
-    else db.get(payload.key) match {
-      case Some(entry) => entry.node
-      case None => create(payload.db, payload.key, payload.nodeType)
-    }
+  def node: ActorRef = {
+    if (payload.nodeType == "keys")
+      self
+    else
+      db.get(payload.key) match {
+        case Some(entry) => entry.node
+        case None => create(payload.db, payload.key, payload.nodeType)
+      }
   }
 
-  def create(db: String, key: String, nodeType: String, recovery: Boolean = false) = {
+  def create(db: String, key: String, nodeType: String, recovery: Boolean = false): ActorRef = {
     dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
       case "string"      => Props[StringNode]
       case "bitmap"      => Props[BitmapNode]
@@ -590,53 +673,29 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       case "set"         => Props[SetNode]
       case "sortedset"   => Props[SortedSetNode]
     }, s"$db-$nodeType-$key"))
-    if (!recovery) save; dbFor(db)(key).node
+    if (!recovery) save
+    dbFor(db)(key).node
   }
 
-  def delete(key: String) = db.remove(key) match {
+  def delete(key: String): Boolean = db.remove(key) match {
     case Some(entry) => entry.node ! Delete; true
     case None => false
   }
 
-  def subscribeOrUnsubscribe = {
-    val pattern = payload.command.startsWith("_p")
-    val current = if (pattern) patterns else channels
-    val key = if (pattern) args(0) else payload.key
-    val subscriber = payload.destination.get
-    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "subscribe"
-    val subscribers = if (subscribing) current.getOrElseUpdate(key, mutable.Set[ActorRef]())
-      else current.getOrElse(key, mutable.Set[ActorRef]())
-    val subscribed = subscribing && subscribers.add(subscriber)
-    val unsubscribed = !subscribing && subscribers.remove(subscriber)
-    if (unsubscribed && current(key).isEmpty) current -= key
-    if (subscribed || unsubscribed) subscriber ! PubSubEvent(payload.command.tail, key)
-  }
-
-  override def run = {
+  override def run: Run = {
     case "_del"          => (payload.key +: args).map(delete)
     case "_keys"         => pattern(db.keys, args(0))
     case "_randomkey"    => randomItem(db.keys)
     case "_flushdb"      => db.clear; SimpleReply()
     case "_flushall"     => value.clear; SimpleReply()
-    case "_numsub"       => channels.getOrElse(payload.key, mutable.Set[ActorRef]()).size
+    case "_numsub"       => channels.get(payload.key).map(_.size).sum
     case "_numpat"       => patterns.values.map(_.size).sum
     case "_channels"     => pattern(channels.keys, args(0))
     case "_subscribe"    => subscribeOrUnsubscribe
     case "_unsubscribe"  => subscribeOrUnsubscribe
     case "_psubscribe"   => subscribeOrUnsubscribe
     case "_punsubscribe" => subscribeOrUnsubscribe
-    case "publish"       =>
-      val subscribers = channels.getOrElse(payload.key, mutable.Set[ActorRef]())
-      val matches = patterns.filterKeys(!pattern(Seq(payload.key), _).isEmpty)
-      val message = Response(payload.key, Seq("message", payload.key, args(0)))
-      var sent = subscribers.size
-      subscribers.foreach(_ ! message)
-      matches.foreach {entry =>
-        val message = Response(payload.key, Seq("pmessage", entry._1, payload.key, args(0)))
-        sent += entry._2.size
-        entry._2.foreach(_ ! message)
-      }
-      sent
+    case "publish"       => publish
     case "exists"        => args.map(db.contains)
     case "ttl"           => ttl / 1000
     case "pttl"          => ttl
@@ -647,23 +706,12 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "type"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
     case "renamenx"      => val x = db.contains(payload.key); if (x) {run("rename")}; x
     case "rename"        => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); SimpleReply()
-    case "persist"       =>
-      val entry = db(payload.key)
-      entry.expiry match {
-        case Some((_, cancellable)) => cancellable.cancel(); entry.expiry = None; 1
-        case None => 0
-      }
-    case "sort"          =>
-      db(payload.key).nodeType match {
-        case "list" | "set" | "sortedset" =>
-          val sortArgs = Seq("_sort", payload.key) ++ payload.args
-          db(payload.key).node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
-        case _ => wrongType
-      }
+    case "persist"       => persist
+    case "sort"          => sort
   }
 
-  override def receiveCommand = ({
-    case Unrouted(p) => payload = p; validate match {
+  override def receiveCommand: Receive = ({
+    case Routable(p) => payload = p; validate match {
       case Some(errorOrDefault) => respond(errorOrDefault)
       case None =>
         val overwrite = !db.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
@@ -674,7 +722,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   override def receiveRecover: Receive = {
     case SnapshotOffer(_, snapshot) =>
-      snapshot.asInstanceOf[mutable.Map[String, mutable.Map[String, NodeEntry]]].foreach {db =>
+      snapshot.asInstanceOf[mutable.Map[String, DB]].foreach {db =>
         db._2.foreach {item => create(db._1, item._1, item._2.nodeType, recovery = true)}
       }
   }
@@ -698,14 +746,20 @@ class ClientNode extends Node[Null] {
     context.actorOf(props, s"aggregate-${payload.command}-${aggregateId}") ! payload
   }
 
-  def subscribeOrUnsubscribe = {
+  def subscribeOrUnsubscribe: Unit = {
     val pattern = payload.command.head == 'p'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
     xs.foreach {x => route(Seq("_" + payload.command, x), destination = payload.destination, broadcast = pattern)}
   }
 
-  def run = {
+  def pubSub: Unit = args(0) match {
+    case "channels" => aggregate(Props[AggregatePubSubChannels])
+    case "numsub"   => aggregate(Props[AggregatePubSubNumSub])
+    case "numpat"   => route(Seq("_numpat", Random.alphanumeric.take(5)), destination = payload.destination)
+  }
+
+  def run: Run = {
     case "mset"         => argsPaired.foreach {args => route(Seq("set", args._1, args._2))}; SimpleReply()
     case "msetnx"       => aggregate(Props[AggregateMSetNX])
     case "mget"         => aggregate(Props[AggregateMGet])
@@ -731,39 +785,36 @@ class ClientNode extends Node[Null] {
     case "echo"         => args(0)
     case "ping"         => SimpleReply("PONG")
     case "time"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
-    case "shutdown"     => context.system.shutdown()
+    case "shutdown"     => context.system.terminate(); SimpleReply()
     case "quit"         => quitting = true; SimpleReply()
     case "subscribe"    => subscribeOrUnsubscribe
     case "unsubscribe"  => subscribeOrUnsubscribe
     case "psubscribe"   => subscribeOrUnsubscribe
     case "punsubscribe" => subscribeOrUnsubscribe
-    case "pubsub"       =>
-      args(0) match {
-        case "channels" => aggregate(Props[AggregatePubSubChannels])
-        case "numsub"   => aggregate(Props[AggregatePubSubNumSub])
-        case "numpat"   => route(Seq("_numpat", Random.alphanumeric.take(5)), destination = payload.destination)
-      }
+    case "pubsub"       => pubSub
   }
 
-  def validate = {
+  def validate: Option[ErrorReply] = {
     if (payload.nodeType == "")
-      Some(Error(s"unknown command '${payload.command}'"))
+      Some(ErrorReply(s"unknown command '${payload.command}'"))
     else if ((payload.key == "" && Commands.keyed(payload.command))
         || !Commands.argsInRange(payload.command, payload.args))
-      Some(Error(s"wrong number of arguments for '${payload.command}' command"))
-    else None
+      Some(ErrorReply(s"wrong number of arguments for '${payload.command}' command"))
+    else
+      None
   }
 
-  def readInput(received: String) = {
+  def parseInput(received: String): Seq[String] = {
 
     buffer.append(received)
     var pos = 0
 
-    def next(length: Int = 0) = {
+    def next(length: Int = 0): String = {
       val to = if (length <= 0) buffer.indexOf(end, pos) else pos + length
       val part = buffer.slice(pos, to)
       if (part.size != to - pos) throw new Exception()
-      pos = to + end.size; part.stripLineEnd
+      pos = to + end.size
+      part.stripLineEnd
     }
 
     def parts: Seq[String] = {
@@ -783,44 +834,51 @@ class ClientNode extends Node[Null] {
 
   }
 
-  def writeOutput(response: Any): String = response match {
-    case x: Iterable[Any]   => s"*${x.size}${end}${x.map(writeOutput).mkString}"
-    case x: Boolean         => writeOutput(if (x) 1 else 0)
-    case x: Number          => s":$x$end"
-    case Error(msg, prefix) => s"-$prefix $msg$end"
-    case SimpleReply(msg)   => s"+$msg$end"
-    case null               => s"$$-1$end"
-    case x                  => s"$$${x.toString.size}$end$x$end"
+  def writeResponse(response: Any): String = response match {
+    case x: Iterable[Any]        => s"*${x.size}${end}${x.map(writeResponse).mkString}"
+    case x: Boolean              => writeResponse(if (x) 1 else 0)
+    case x: Number               => s":$x$end"
+    case ErrorReply(msg, prefix) => s"-$prefix $msg$end"
+    case SimpleReply(msg)        => s"+$msg$end"
+    case null                    => s"$$-1$end"
+    case x                       => s"$$${x.toString.size}$end$x$end"
   }
 
-  override def receiveCommand = ({
+  override def receiveCommand: Receive = ({
+
     case Tcp.Received(data) =>
-      val input = readInput(data.utf8String)
+      val input = parseInput(data.utf8String)
       if (input.size > 0) {
         payload = Payload(input, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
           case Some(error) => respond(error)
           case None =>
-            if (payload.nodeType == "client") self ! payload
-            else route(clientPayload = Option(payload))
+            if (payload.nodeType == "client")
+              self ! payload
+            else
+              route(clientPayload = Option(payload))
         }
       }
+
     case Tcp.PeerClosed =>
       channels.foreach {x => route(Seq("_unsubscribe", x), destination = Some(self))}
       patterns.foreach {x => route(Seq("_punsubscribe", x), destination = Some(self), broadcast = true)}
       context stop self
+
     case PubSubEvent(event, channelOrPattern) =>
       val current = if (event.head == 'p') patterns else channels
       val subscribing = event.stripPrefix("p") == "subscribe"
       val subscribed = subscribing && current.add(channelOrPattern)
       val unsubscribed = !subscribing && current.remove(channelOrPattern)
-      if (subscribed || unsubscribed)
+      if (subscribed || unsubscribed) {
         self ! Response(channelOrPattern, Seq(event, channelOrPattern, current.size.toString))
-    case Response(_, response) => client.foreach {client =>
-      client ! Tcp.Write(ByteString(writeOutput(response)))
+      }
+
+    case Response(_, response) =>
+      client.get ! Tcp.Write(ByteString(writeResponse(response)))
       if (quitting) self ! Delete
-    }
+
   }: Receive) orElse super.receiveCommand
 
 }
@@ -829,15 +887,15 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
 
   var responses = mutable.Map[String, T]()
 
-  def keys = args
+  def keys: Seq[String] = args
 
-  def ordered = keys.map(responses(_))
+  def ordered: Seq[T] = keys.map(responses(_))
 
   def complete: Any = ordered
 
   def begin = keys.foreach {key => route(Seq(command, key), destination = Some(self))}
 
-  def receive = LoggingReceive {
+  def receive: Receive = LoggingReceive {
     case p: Payload => payload = p; begin
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
@@ -845,7 +903,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
       if (responses.size == keys.size) {
         respond(Try(complete) match {
           case Success(response) => response
-          case Failure(e) => log.error(e, s"Error running: $payload"); Error
+          case Failure(e) => log.error(e, s"Error running: $payload"); ErrorReply
         })
         context stop self
       }
@@ -856,7 +914,8 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
 class AggregateMGet extends Aggregate[String]("get")
 
 abstract class AggregateSetReducer[T](command: String) extends Aggregate[T](command) {
-  lazy val reducer: (mutable.Set[String], mutable.Set[String]) => mutable.Set[String] = payload.command.tail match {
+  type S = mutable.Set[String]
+  lazy val reducer: (S, S) => S = payload.command.tail match {
     case x if x.startsWith("diff")  => (_ &~ _)
     case x if x.startsWith("inter") => (_ & _)
     case x if x.startsWith("union") => (_ | _)
@@ -870,9 +929,8 @@ class AggregateSet extends BaseAggregateSet {
 }
 
 class AggregateSetStore extends BaseAggregateSet {
-  override def complete: Unit = {
+  override def complete: Unit =
     route(Seq("_sstore", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
-  }
 }
 
 class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String, Int]]("_zget") {
@@ -886,9 +944,9 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
     case "MAX" => max _
   }
 
-  def weight(i: Int) = if (weightPos == -1) 1 else args(weightPos + i + 1).toInt
+  def weight(i: Int): Int = if (weightPos == -1) 1 else args(weightPos + i + 1).toInt
 
-  override def keys = args.slice(1, args(0).toInt + 1)
+  override def keys: Seq[String] = args.slice(1, args(0).toInt + 1)
 
   override def complete: Unit = {
     var i = 0
@@ -901,7 +959,9 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
           else if (!x.containsKey(key)) yVal
           else aggregate(xVal, yVal)
         out.put(key, value)
-      }; i += 1; out
+      }
+      i += 1
+      out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
     route(Seq("_zstore", payload.key) ++ result, destination = payload.destination)
   }
@@ -909,7 +969,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
 }
 
 class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
-  override def keys = args.drop(2)
+  override def keys: Seq[String] = args.drop(2)
   override def complete: Unit = {
     val result = args(0).toUpperCase match {
       case "AND" => ordered.reduce(_ & _)
@@ -925,74 +985,74 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
 }
 
 class AggregateHyperLogLogCount extends Aggregate[Long]("_pfcount") {
-  override def complete = responses.values.sum
+  override def complete: Long = responses.values.sum
 }
 
 class AggregateHyperLogLogMerge extends Aggregate[HLL]("_pfget") {
-  override def complete = {
+  override def complete: Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
     route(Seq("_pfstore", payload.key) ++ result, destination = payload.destination)
   }
 }
 
 abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
-  def broadcastArgs = payload.args
-  override def keys = (1 to context.system.settings.config.getInt("curiodb.keynodes")).map(_.toString)
-  override def begin = route(command +: broadcastArgs, destination = Some(self), broadcast = true)
+  def broadcastArgs: Seq[String] = payload.args
+  override def keys: Seq[String] = (1 to context.system.settings.config.getInt("curiodb.keynodes")).map(_.toString)
+  override def begin: Unit = route(command +: broadcastArgs, destination = Some(self), broadcast = true)
 }
 
 class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_channels") {
-  override def broadcastArgs = Seq(if (args.size == 2) args(1) else "*")
-  override def complete = responses.values.reduce(_ ++ _)
+  override def broadcastArgs: Seq[String] = Seq(if (args.size == 2) args(1) else "*")
+  override def complete: Iterable[String] = responses.values.reduce(_ ++ _)
 }
 
 class AggregatePubSubNumSub extends Aggregate[Int]("_numsub") {
-  override def keys = args.drop(1)
-  override def begin = if (keys.isEmpty) {respond(Seq()); context stop self} else super.begin
-  override def complete = keys.flatMap(x => Seq(x, responses(x).toString))
+  override def keys: Seq[String] = args.drop(1)
+  override def begin: Unit = if (keys.isEmpty) {respond(Seq()); context stop self} else super.begin
+  override def complete: Seq[String] = keys.flatMap(x => Seq(x, responses(x).toString))
 }
 
 abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
-  def reduced = responses.values.reduce(_ ++ _)
+  def reduced: Iterable[String] = responses.values.reduce(_ ++ _)
 }
 
 class AggregateKeys extends BaseAggregateKeys {
-  override def complete = reduced
+  override def complete: Iterable[String] = reduced
 }
 
 class AggregateScan extends BaseAggregateKeys {
-  override def broadcastArgs = Seq("*")
-  override def complete = scan(reduced)
+  override def broadcastArgs: Seq[String] = Seq("*")
+  override def complete: Seq[String] = scan(reduced)
 }
 
 class AggregateDBSize extends BaseAggregateKeys {
-  override def broadcastArgs = Seq("*")
-  override def complete = reduced.size
+  override def broadcastArgs: Seq[String] = Seq("*")
+  override def complete: Int = reduced.size
 }
 
 class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
-  override def complete = randomItem(responses.values.filter(_ != ""))
+  override def complete: String = randomItem(responses.values.filter(_ != ""))
 }
 
 abstract class AggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {
-  def trues = responses.values.flatten.filter(_ == true)
+  def trues: Iterable[Boolean] = responses.values.flatten.filter(_ == true)
 }
 
 class AggregateDel extends AggregateBool("_del") {
-  override def broadcastArgs = payload.args
-  override def complete = trues.size
+  override def broadcastArgs: Seq[String] = payload.args
+  override def complete: Int = trues.size
 }
 
 class AggregateMSetNX extends AggregateBool("exists") {
-  override def keys = payload.argsPaired.map(_._1)
-  override def complete = {
+  override def keys: Seq[String] = payload.argsPaired.map(_._1)
+  override def complete: Boolean = {
     if (trues.isEmpty) payload.argsPaired.foreach {args => route(Seq("set", args._1, args._2))}
     trues.isEmpty
   }
 }
 
 abstract class AggregateSimpleReply(command: String) extends AggregateBroadcast[String](command) {
-  override def complete = SimpleReply()
+  override def complete: SimpleReply = SimpleReply()
 }
 
 class AggregateFlushDB extends AggregateSimpleReply("_flushdb")
@@ -1001,7 +1061,7 @@ class AggregateFlushAll extends AggregateSimpleReply("_flushall")
 
 class Server(listen: URI) extends Actor {
   IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
-  def receive = LoggingReceive {
+  def receive: Receive = LoggingReceive {
     case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[ClientNode]))
   }
 }
@@ -1013,7 +1073,7 @@ object CurioDB {
     val config    = ConfigFactory.load()
     val listen    = new URI(config.getString("curiodb.listen"))
     val node      = if (args.isEmpty) config.getString("curiodb.node") else args(0)
-    val nodes     = config.getObject("curiodb.nodes").map(node => (node._1 -> new URI(node._2.unwrapped.toString)))
+    val nodes     = config.getObject("curiodb.nodes").map(n => (n._1 -> new URI(n._2.unwrapped.toString)))
     val keyNodes  = nodes.size * config.getInt("akka.actor.deployment./keys.cluster.max-nr-of-instances-per-node")
     val seedNodes = nodes.values.map(u => s""" "akka.${u.getScheme}://${sysName}@${u.getHost}:${u.getPort}" """)
 
@@ -1033,7 +1093,7 @@ object CurioDB {
     }
 
     system.actorOf(Props(new Server(listen)), "server")
-    system.awaitTermination()
+    Await.result(system.whenTerminated, Duration.Inf)
 
   }
 }
