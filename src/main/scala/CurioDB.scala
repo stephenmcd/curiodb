@@ -172,6 +172,8 @@ case object Persist extends ControlMessage
 
 case object Delete extends ControlMessage
 
+case object Sleep extends ControlMessage
+
 abstract class Node[T] extends PersistentActor with PayloadProcessing with ActorLogging {
 
   var value: T
@@ -214,6 +216,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
     case Persist    => persisting = false; saveSnapshot(value)
     case Delete     => deleteOldSnapshots(stopping = true); context stop self
+    case Sleep      => context stop self
     case p: Payload =>
       payload = p
       respond(Try(run(payload.command)) match {
@@ -560,8 +563,9 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
 @SerialVersionUID(1L)
 class NodeEntry(
     val nodeType: String,
-    @transient val node: ActorRef,
-    @transient var expiry: Option[(Long, Cancellable)] = None)
+    @transient var node: Option[ActorRef] = None,
+    @transient var expiry: Option[(Long, Cancellable)] = None,
+    @transient var sleep: Option[Cancellable] = None)
   extends Serializable
 
 case class PubSubEvent(event: String, channelOrPattern: String)
@@ -573,6 +577,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
   val wrongType = ErrorReply("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
   val channels = mutable.Map[String, mutable.Set[ActorRef]]()
   val patterns = mutable.Map[String, mutable.Set[ActorRef]]()
+  val sleepAfter = context.system.settings.config.getInt("curiodb.sleep-after")
+  val sleepEnabled = sleepAfter > 0
 
   def dbFor(name: String): DB =
     value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
@@ -597,6 +603,20 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     1
   }
 
+  def sleep: Unit = {
+    if (!sleepEnabled) return
+    val when = sleepAfter milliseconds
+    val key = payload.key
+    val entry = db(key)
+    entry.sleep.foreach(_.cancel())
+    entry.sleep = Some(context.system.scheduler.scheduleOnce(when) {
+      db.get(key).foreach {entry =>
+        entry.node.foreach(_ ! Sleep)
+        entry.node = None
+      }
+    })
+  }
+
   def ttl: Long = db(payload.key).expiry match {
     case Some((when, _)) => when - System.currentTimeMillis
     case None => -1
@@ -605,7 +625,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
   def sort: Any = db(payload.key).nodeType match {
     case "list" | "set" | "sortedset" =>
       val sortArgs = Seq("_sort", payload.key) ++ payload.args
-      db(payload.key).node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
+      node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
     case _ => wrongType
   }
 
@@ -657,14 +677,14 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     if (payload.nodeType == "keys")
       self
     else
-      db.get(payload.key) match {
-        case Some(entry) => entry.node
-        case None => create(payload.db, payload.key, payload.nodeType)
+      db.get(payload.key).flatMap(_.node) match {
+        case Some(node) => node
+        case None => create(payload.db, payload.key, payload.nodeType).get
       }
   }
 
-  def create(db: String, key: String, nodeType: String, recovery: Boolean = false): ActorRef = {
-    dbFor(db)(key) = new NodeEntry(nodeType, context.actorOf(nodeType match {
+  def create(db: String, key: String, nodeType: String, recovery: Boolean = false): Option[ActorRef] = {
+    val node = if (recovery && sleepEnabled) None else Some(context.actorOf(nodeType match {
       case "string"      => Props[StringNode]
       case "bitmap"      => Props[BitmapNode]
       case "hyperloglog" => Props[HyperLogLogNode]
@@ -673,12 +693,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       case "set"         => Props[SetNode]
       case "sortedset"   => Props[SortedSetNode]
     }, s"$db-$nodeType-$key"))
+    dbFor(db)(key) = new NodeEntry(nodeType, node)
     if (!recovery) save
-    dbFor(db)(key).node
+    node
   }
 
   def delete(key: String): Boolean = db.remove(key) match {
-    case Some(entry) => entry.node ! Delete; true
+    case Some(entry) => entry.node.foreach(_ ! Delete); true
     case None => false
   }
 
@@ -705,7 +726,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "pexpireat"     => expire(args(0).toLong)
     case "type"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
     case "renamenx"      => val x = db.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"        => db(payload.key).node ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db); SimpleReply()
+    case "rename"        => db(payload.key).node.foreach(_ ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db)); SimpleReply()
     case "persist"       => persist
     case "sort"          => sort
   }
@@ -717,6 +738,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
         val overwrite = !db.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
         if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
         node ! payload
+        if (sleepEnabled) sleep
     }
   }: Receive) orElse super.receiveCommand
 
