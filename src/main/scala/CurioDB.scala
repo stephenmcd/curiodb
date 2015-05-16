@@ -698,17 +698,18 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     node
   }
 
-  def delete(key: String): Boolean = db.remove(key) match {
-    case Some(entry) => entry.node.foreach(_ ! Delete); true
-    case None => false
-  }
+  def delete(key: String, dbName: Option[String] = None): Boolean =
+    dbFor(dbName.getOrElse(payload.db)).remove(key) match {
+      case Some(entry) => entry.node.foreach(_ ! Delete); true
+      case None => false
+    }
 
   override def run: Run = {
-    case "_del"          => (payload.key +: args).map(delete)
+    case "_del"          => (payload.key +: args).map(key => delete(key))
     case "_keys"         => pattern(db.keys, args(0))
     case "_randomkey"    => randomItem(db.keys)
-    case "_flushdb"      => db.clear; SimpleReply()
-    case "_flushall"     => value.clear; SimpleReply()
+    case "_flushdb"      => db.keys.map(key => delete(key)); SimpleReply()
+    case "_flushall"     => value.foreach(db => db._2.keys.map(key => delete(key, Some(db._1)))); SimpleReply()
     case "_numsub"       => channels.get(payload.key).map(_.size).sum
     case "_numpat"       => patterns.values.map(_.size).sum
     case "_channels"     => pattern(channels.keys, args(0))
