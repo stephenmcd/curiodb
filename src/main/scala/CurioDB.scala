@@ -822,7 +822,7 @@ trait PubSubClient extends PayloadProcessing {
     case "punsubscribe" => subscribeOrUnsubscribe
     case "pubsub"       => args(0) match {
       case "channels" => aggregate(Props[AggregatePubSubChannels])
-      case "numsub"   => aggregate(Props[AggregatePubSubNumSub])
+      case "numsub"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
       case "numpat"   => route(Seq("_numpat", randomString()), destination = payload.destination)
     }
   }
@@ -1060,7 +1060,6 @@ class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_cha
 
 class AggregatePubSubNumSub extends Aggregate[Int]("_numsub") {
   override def keys: Seq[String] = args.drop(1)
-  override def begin: Unit = if (keys.isEmpty) {respond(Seq()); stop} else super.begin
   override def complete: Seq[String] = keys.flatMap(x => Seq(x, responses(x).toString))
 }
 
