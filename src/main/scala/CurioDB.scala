@@ -843,7 +843,6 @@ trait PubSubClient extends PayloadProcessing {
 class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
 
   var value = null
-  var quitting = false
   val buffer = new StringBuilder()
   var client: Option[ActorRef] = None
   var db = payload.db
@@ -855,7 +854,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
     case "ping"         => SimpleReply("PONG")
     case "time"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
     case "shutdown"     => context.system.terminate(); SimpleReply()
-    case "quit"         => quitting = true; SimpleReply()
+    case "quit"         => respond(SimpleReply()); self ! Delete
   }: CommandRunner) orElse runPubSub orElse runAggregate
 
   def validate: Option[ErrorReply] = {
@@ -927,9 +926,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
 
     case Tcp.PeerClosed => stop
 
-    case Response(_, response) =>
-      client.get ! Tcp.Write(ByteString(writeResponse(response)))
-      if (quitting) self ! Delete
+    case Response(_, response) => client.get ! Tcp.Write(ByteString(writeResponse(response)))
 
   }: Receive) orElse receivePubSub orElse super.receiveCommand
 
