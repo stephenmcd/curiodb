@@ -867,7 +867,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
       None
   }
 
-  def parseInput: Seq[String] = {
+  def parseBuffer: Option[Seq[String]] = {
 
     var pos = 0
 
@@ -890,8 +890,8 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
     }
 
     Try(parts) match {
-      case Success(output) => buffer.delete(0, pos); output
-      case Failure(_)      => Seq[String]()
+      case Success(output) => buffer.delete(0, pos); Some(output)
+      case Failure(_)      => None
     }
 
   }
@@ -909,10 +909,10 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
   override def receiveCommand: Receive = ({
 
     case Tcp.Received(data) =>
-      var input = Seq[String]()
+      var parsed: Option[Seq[String]] = None
       buffer.append(data.utf8String)
-      while ({input = parseInput; input.size > 0}) {
-        payload = Payload(input, db = db, destination = Some(self))
+      while ({parsed = parseBuffer; parsed.isDefined}) {
+        payload = Payload(parsed.get, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
           case Some(error) => respond(error)
