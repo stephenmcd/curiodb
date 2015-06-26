@@ -356,11 +356,14 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * allow external (client facing) commands to map to a single type
    * of Node.
    */
-  def sort: Any = db(payload.key).nodeType match {
-    case "list" | "set" | "sortedset" =>
-      val sortArgs = Seq("_sort", payload.key) ++ payload.args
-      node ! Payload(sortArgs, db = payload.db, destination = payload.destination)
-    case _ => wrongType
+  def sort: Any = {
+      val entry = db(payload.key)
+      entry.nodeType match {
+        case "list" | "set" | "sortedset" =>
+          val sortArgs = Seq("_sort", payload.key) ++ payload.args
+          entry.node.get ! Payload(sortArgs, db = payload.db, destination = payload.destination)
+        case _ => wrongType
+      }
   }
 
   /**
