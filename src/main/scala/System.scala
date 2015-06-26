@@ -156,7 +156,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
    */
   def rename(fromValue: Any, toCommand: String): Unit =
     if (payload.key != args(0)) {
-      route(Seq("_del", payload.key))
+      route(Seq("_DEL", payload.key))
       route(Seq(toCommand, args(0)) ++ (fromValue match {
         case x: Iterable[Any] => x
         case x => Seq(x)
@@ -175,7 +175,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     if (limit > -1) sorted = sorted.slice(args(limit + 1).toInt, args(limit + 2).toInt)
     val store = argsUpper.indexOf("STORE")
     if (store > -1) {
-      route(Seq("_lstore", args(store + 1)) ++ sorted)
+      route(Seq("_LSTORE", args(store + 1)) ++ sorted)
       sorted.size
     } else sorted
   }
@@ -313,7 +313,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     persist
     val expires = (when - System.currentTimeMillis).toInt milliseconds
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
-      self ! Payload(Seq("_del", payload.key), db = payload.db)
+      self ! Payload(Seq("_DEL", payload.key), db = payload.db)
     }
     db(payload.key).expiry = Some((when, cancellable))
     1
@@ -360,7 +360,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       val entry = db(payload.key)
       entry.nodeType match {
         case "list" | "set" | "sortedset" =>
-          val sortArgs = Seq("_sort", payload.key) ++ payload.args
+          val sortArgs = Seq("_SORT", payload.key) ++ payload.args
           entry.node.get ! Payload(sortArgs, db = payload.db, destination = payload.destination)
         case _ => wrongType
       }
@@ -381,8 +381,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     val nodeType    = if (exists) db(payload.key).nodeType else ""
     val invalidType = (nodeType != "" && payload.nodeType != nodeType &&
       payload.nodeType != "keys" && !Commands.overwrites(payload.command))
-    val cantExist   = payload.command == "lpushx" || payload.command == "rpushx"
-    val mustExist   = payload.command == "setnx"
+    val cantExist   = payload.command == "LPUSHX" || payload.command == "RPUSHX"
+    val mustExist   = payload.command == "SETNX"
     val default     = Commands.default(payload.command, payload.args)
     if (invalidType)
       Some(wrongType)
@@ -439,23 +439,23 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     }
 
   override def run: CommandRunner = ({
-    case "_del"          => (payload.key +: args).map(key => delete(key))
-    case "_keys"         => pattern(db.keys, args(0))
-    case "_randomkey"    => randomItem(db.keys)
-    case "_flushdb"      => db.keys.map(key => delete(key)); SimpleReply()
-    case "_flushall"     => value.foreach(db => db._2.keys.map(key => delete(key, Some(db._1)))); SimpleReply()
-    case "exists"        => args.map(db.contains)
-    case "ttl"           => ttl / 1000
-    case "pttl"          => ttl
-    case "expire"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
-    case "pexpire"       => expire(System.currentTimeMillis + args(0).toInt)
-    case "expireat"      => expire(args(0).toLong / 1000)
-    case "pexpireat"     => expire(args(0).toLong)
-    case "type"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
-    case "renamenx"      => val x = db.contains(payload.key); if (x) {run("rename")}; x
-    case "rename"        => db(payload.key).node.foreach(_ ! Payload(Seq("_rename", payload.key, args(0)), db = payload.db)); SimpleReply()
-    case "persist"       => persist
-    case "sort"          => sort
+    case "_DEL"          => (payload.key +: args).map(key => delete(key))
+    case "_KEYS"         => pattern(db.keys, args(0))
+    case "_RANDOMKEY"    => randomItem(db.keys)
+    case "_FLUSHDB"      => db.keys.map(key => delete(key)); SimpleReply()
+    case "_FLUSHALL"     => value.foreach(db => db._2.keys.map(key => delete(key, Some(db._1)))); SimpleReply()
+    case "EXISTS"        => args.map(db.contains)
+    case "TTL"           => ttl / 1000
+    case "PTTL"          => ttl
+    case "EXPIRE"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
+    case "PEXPIRE"       => expire(System.currentTimeMillis + args(0).toInt)
+    case "EXPIREAT"      => expire(args(0).toLong / 1000)
+    case "PEXPIREAT"     => expire(args(0).toLong)
+    case "TYPE"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
+    case "RENAMENX"      => val x = db.contains(payload.key); if (x) {run("RENAME")}; x
+    case "RENAME"        => db(payload.key).node.foreach(_ ! Payload(Seq("_RENAME", payload.key, args(0)), db = payload.db)); SimpleReply()
+    case "PERSIST"       => persist
+    case "SORT"          => sort
   }: CommandRunner) orElse runPubSub
 
   /**
@@ -471,7 +471,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
         if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
         node ! payload
         if (payload.command match {
-          case "_subscribe" | "_unsubscribe" | "publish" => false
+          case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" => false
           case _ => sleepEnabled
         }) sleep
     }
@@ -530,12 +530,12 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
   val end = "\r\n"
 
   def run: CommandRunner = ({
-    case "select"       => db = args(0); SimpleReply()
-    case "echo"         => args(0)
-    case "ping"         => SimpleReply("PONG")
-    case "time"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
-    case "shutdown"     => context.system.terminate(); SimpleReply()
-    case "quit"         => respond(SimpleReply()); self ! Delete
+    case "SELECT"       => db = args(0); SimpleReply()
+    case "ECHO"         => args(0)
+    case "PING"         => SimpleReply("PONG")
+    case "TIME"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
+    case "SHUTDOWN"     => context.system.terminate(); SimpleReply()
+    case "QUIT"         => respond(SimpleReply()); self ! Delete
   }: CommandRunner) orElse runPubSub orElse runAggregate
 
   /**

@@ -34,22 +34,22 @@ class StringNode extends Node[String] {
   def expire(command: String): Unit = route(Seq(command, payload.key, args(1)))
 
   def run: CommandRunner = {
-    case "_rename"     => rename(value, "set")
-    case "get"         => value
-    case "set"         => value = args(0); SimpleReply()
-    case "setnx"       => run("set"); true
-    case "getset"      => val x = value; value = args(0); x
-    case "append"      => value += args(0); value
-    case "getrange"    => slice(value).mkString
-    case "setrange"    => value.patch(args(0).toInt, args(1), 1)
-    case "strlen"      => value.size
-    case "incr"        => value = (valueOrZero.toInt + 1).toString; value.toInt
-    case "incrby"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
-    case "incrbyfloat" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
-    case "decr"        => value = (valueOrZero.toInt - 1).toString; value.toInt
-    case "decrby"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
-    case "setex"       => val x = run("set"); expire("expire"); x
-    case "psetex"      => val x = run("set"); expire("pexpire"); x
+    case "_RENAME"     => rename(value, "SET")
+    case "GET"         => value
+    case "SET"         => value = args(0); SimpleReply()
+    case "SETNX"       => run("SET"); true
+    case "GETSET"      => val x = value; value = args(0); x
+    case "APPEND"      => value += args(0); value
+    case "GETRANGE"    => slice(value).mkString
+    case "SETRANGE"    => value.patch(args(0).toInt, args(1), 1)
+    case "STRLEN"      => value.size
+    case "INCR"        => value = (valueOrZero.toInt + 1).toString; value.toInt
+    case "INCRBY"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
+    case "INCRBYFLOAT" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
+    case "DECR"        => value = (valueOrZero.toInt - 1).toString; value.toInt
+    case "DECRBY"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
+    case "SETEX"       => val x = run("SET"); expire("EXPIRE"); x
+    case "PSETEX"      => val x = run("SET"); expire("PEXPIRE"); x
   }
 
 }
@@ -79,13 +79,13 @@ class BitmapNode extends Node[mutable.BitSet] {
   }
 
   def run: CommandRunner = {
-    case "_rename"  => rename(value, "_bstore")
-    case "_bstore"  => value.clear; value ++= args.map(_.toInt); last / 8 + (if (value.isEmpty) 0 else 1)
-    case "_bget"    => value
-    case "bitcount" => value.size
-    case "getbit"   => value(args(0).toInt)
-    case "setbit"   => val x = run("getbit"); value(args(0).toInt) = args(1) == "1"; x
-    case "bitpos"   => bitPos
+    case "_RENAME"  => rename(value, "_BSTORE")
+    case "_BSTORE"  => value.clear; value ++= args.map(_.toInt); last / 8 + (if (value.isEmpty) 0 else 1)
+    case "_BGET"    => value
+    case "BITCOUNT" => value.size
+    case "GETBIT"   => value(args(0).toInt)
+    case "SETBIT"   => val x = run("GETBIT"); value(args(0).toInt) = args(1) == "1"; x
+    case "BITPOS"   => bitPos
   }
 
 }
@@ -113,11 +113,11 @@ class HyperLogLogNode extends Node[HLL] {
   }
 
   def run: CommandRunner = {
-    case "_rename"  => rename(value.toBytes.map(_.toString), "_pfstore")
-    case "_pfcount" => value.cardinality.toInt
-    case "_pfstore" => value.clear(); value = HLL.fromBytes(args.map(_.toByte).toArray); SimpleReply()
-    case "_pfget"   => value
-    case "pfadd"    => add
+    case "_RENAME"  => rename(value.toBytes.map(_.toString), "_PFSTORE")
+    case "_PFCOUNT" => value.cardinality.toInt
+    case "_PFSTORE" => value.clear(); value = HLL.fromBytes(args.map(_.toByte).toArray); SimpleReply()
+    case "_PFGET"   => value
+    case "PFADD"    => add
   }
 
 }
@@ -136,22 +136,22 @@ class HashNode extends Node[mutable.Map[String, String]] {
   def set(arg: Any): String = {val x = arg.toString; value(args(0)) = x; x}
 
   override def run: CommandRunner = {
-    case "_rename"      => rename(run("hgetall"), "_hstore")
-    case "_hstore"      => value.clear; run("hmset")
-    case "hkeys"        => value.keys
-    case "hexists"      => value.contains(args(0))
-    case "hscan"        => scan(value.keys)
-    case "hget"         => value.getOrElse(args(0), null)
-    case "hsetnx"       => if (!value.contains(args(0))) run("hset") else false
-    case "hgetall"      => value.flatMap(x => Seq(x._1, x._2))
-    case "hvals"        => value.values
-    case "hdel"         => val x = run("hexists"); value -= args(0); x
-    case "hlen"         => value.size
-    case "hmget"        => args.map(value.get(_))
-    case "hmset"        => argsPaired.foreach {args => value(args._1) = args._2}; SimpleReply()
-    case "hincrby"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
-    case "hincrbyfloat" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
-    case "hset"         => val x = !value.contains(args(0)); set(args(1)); x
+    case "_RENAME"      => rename(run("HGETALL"), "_HSTORE")
+    case "_HSTORE"      => value.clear; run("HMSET")
+    case "HKEYS"        => value.keys
+    case "HEXISTS"      => value.contains(args(0))
+    case "HSCAN"        => scan(value.keys)
+    case "HGET"         => value.getOrElse(args(0), null)
+    case "HSETNX"       => if (!value.contains(args(0))) run("HSET") else false
+    case "HGETALL"      => value.flatMap(x => Seq(x._1, x._2))
+    case "HVALS"        => value.values
+    case "HDEL"         => val x = run("HEXISTS"); value -= args(0); x
+    case "HLEN"         => value.size
+    case "HMGET"        => args.map(value.get(_))
+    case "HMSET"        => argsPaired.foreach {args => value(args._1) = args._2}; SimpleReply()
+    case "HINCRBY"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
+    case "HINCRBYFLOAT" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
+    case "HSET"         => val x = !value.contains(args(0)); set(args(1)); x
   }
 
 }
@@ -222,26 +222,26 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
   }
 
   def run: CommandRunner = ({
-    case "_rename"    => rename(value, "_lstore")
-    case "_lstore"    => value.clear; run("rpush")
-    case "_sort"      => sort(value)
-    case "lpush"      => value ++= args.reverse; run("llen")
-    case "rpush"      => value ++= args; run("llen")
-    case "lpushx"     => run("lpush")
-    case "rpushx"     => run("rpush")
-    case "lpop"       => val x = value(0); value -= x; x
-    case "rpop"       => val x = value.last; value.reduceToSize(value.size - 1); x
-    case "lset"       => value(args(0).toInt) = args(1); SimpleReply()
-    case "lindex"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
-    case "lrem"       => value.remove(args(0).toInt)
-    case "lrange"     => slice(value)
-    case "ltrim"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; SimpleReply()
-    case "llen"       => value.size
-    case "blpop"      => block
-    case "brpop"      => block
-    case "brpoplpush" => block
-    case "rpoplpush"  => val x = run("rpop"); route("lpush" +: args :+ x.toString); x
-    case "linsert"    => insert
+    case "_RENAME"    => rename(value, "_LSTORE")
+    case "_LSTORE"    => value.clear; run("RPUSH")
+    case "_SORT"      => sort(value)
+    case "LPUSH"      => value ++= args.reverse; run("LLEN")
+    case "RPUSH"      => value ++= args; run("LLEN")
+    case "LPUSHX"     => run("LPUSH")
+    case "RPUSHX"     => run("RPUSH")
+    case "LPOP"       => val x = value(0); value -= x; x
+    case "RPOP"       => val x = value.last; value.reduceToSize(value.size - 1); x
+    case "LSET"       => value(args(0).toInt) = args(1); SimpleReply()
+    case "LINDEX"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
+    case "LREM"       => value.remove(args(0).toInt)
+    case "LRANGE"     => slice(value)
+    case "LTRIM"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; SimpleReply()
+    case "LLEN"       => value.size
+    case "BLPOP"      => block
+    case "BRPOP"      => block
+    case "BRPOPLPUSH" => block
+    case "RPOPLPUSH"  => val x = run("RPOP"); route("LPUSH" +: args :+ x.toString); x
+    case "LINSERT"    => insert
   }: CommandRunner) andThen unblock
 
 }
@@ -254,18 +254,18 @@ class SetNode extends Node[mutable.Set[String]] {
   var value = mutable.Set[String]()
 
   def run: CommandRunner = {
-    case "_rename"     => rename(value, "_sstore")
-    case "_sstore"     => value.clear; run("sadd")
-    case "_sort"       => sort(value)
-    case "sadd"        => val x = (args.toSet &~ value).size; value ++= args; x
-    case "srem"        => val x = (args.toSet & value).size; value --= args; x
-    case "scard"       => value.size
-    case "sismember"   => value.contains(args(0))
-    case "smembers"    => value
-    case "srandmember" => randomItem(value)
-    case "spop"        => val x = run("srandmember"); value -= x.toString; x
-    case "sscan"       => scan(value)
-    case "smove"       => val x = value.remove(args(1)); if (x) {route("sadd" +: args)}; x
+    case "_RENAME"     => rename(value, "_SSTORE")
+    case "_SSTORE"     => value.clear; run("SADD")
+    case "_SORT"       => sort(value)
+    case "SADD"        => val x = (args.toSet &~ value).size; value ++= args; x
+    case "SREM"        => val x = (args.toSet & value).size; value --= args; x
+    case "SCARD"       => value.size
+    case "SISMEMBER"   => value.contains(args(0))
+    case "SMEMBERS"    => value
+    case "SRANDMEMBER" => randomItem(value)
+    case "SPOP"        => val x = run("SRANDMEMBER"); value -= x.toString; x
+    case "SSCAN"       => scan(value)
+    case "SMOVE"       => val x = value.remove(args(1)); if (x) {route("SADD" +: args)}; x
   }
 
 }
@@ -428,29 +428,29 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
   }
 
   def run: CommandRunner = {
-    case "_rename"          => rename(scores.flatMap(x => Seq(x.score, x.key)), "_zstore")
-    case "_zstore"          => keys.clear; scores.clear; run("zadd")
-    case "_zget"            => keys
-    case "_sort"            => sort(keys.keys)
-    case "zadd"             => argsPaired.map(arg => add(arg._1.toInt, arg._2)).filter(x => x).size
-    case "zcard"            => keys.size
-    case "zcount"           => rangeByScore(args(0), args(1)).size
-    case "zincrby"          => increment(args(0), args(1).toInt)
-    case "zlexcount"        => rangeByKey(args(0), args(1)).size
-    case "zrange"           => rangeByIndex(args(0), args(1))
-    case "zrangebylex"      => rangeByKey(args(0), args(1))
-    case "zrangebyscore"    => rangeByScore(args(0), args(1))
-    case "zrank"            => rank(args(0))
-    case "zrem"             => remove(args(0))
-    case "zremrangebylex"   => rangeByKey(args(0), args(1)).map(remove).filter(x => x).size
-    case "zremrangebyrank"  => rangeByIndex(args(0), args(1)).map(remove).filter(x => x).size
-    case "zremrangebyscore" => rangeByScore(args(0), args(1)).map(remove).filter(x => x).size
-    case "zrevrange"        => rangeByIndex(args(1), args(0), reverse = true)
-    case "zrevrangebylex"   => rangeByKey(args(1), args(0), reverse = true)
-    case "zrevrangebyscore" => rangeByScore(args(1), args(0), reverse = true)
-    case "zrevrank"         => rank(args(0), reverse = true)
-    case "zscan"            => scan(keys.keys)
-    case "zscore"           => keys.get(args(0))
+    case "_RENAME"          => rename(scores.flatMap(x => Seq(x.score, x.key)), "_ZSTORE")
+    case "_ZSTORE"          => keys.clear; scores.clear; run("ZADD")
+    case "_ZGET"            => keys
+    case "_SORT"            => sort(keys.keys)
+    case "ZADD"             => argsPaired.map(arg => add(arg._1.toInt, arg._2)).filter(x => x).size
+    case "ZCARD"            => keys.size
+    case "ZCOUNT"           => rangeByScore(args(0), args(1)).size
+    case "ZINCRBY"          => increment(args(0), args(1).toInt)
+    case "ZLEXCOUNT"        => rangeByKey(args(0), args(1)).size
+    case "ZRANGE"           => rangeByIndex(args(0), args(1))
+    case "ZRANGEBYLEX"      => rangeByKey(args(0), args(1))
+    case "ZRANGEBYSCORE"    => rangeByScore(args(0), args(1))
+    case "ZRANK"            => rank(args(0))
+    case "ZREM"             => remove(args(0))
+    case "ZREMRANGEBYLEX"   => rangeByKey(args(0), args(1)).map(remove).filter(x => x).size
+    case "ZREMRANGEBYRANK"  => rangeByIndex(args(0), args(1)).map(remove).filter(x => x).size
+    case "ZREMRANGEBYSCORE" => rangeByScore(args(0), args(1)).map(remove).filter(x => x).size
+    case "ZREVRANGE"        => rangeByIndex(args(1), args(0), reverse = true)
+    case "ZREVRANGEBYLEX"   => rangeByKey(args(1), args(0), reverse = true)
+    case "ZREVRANGEBYSCORE" => rangeByScore(args(1), args(0), reverse = true)
+    case "ZREVRANK"         => rank(args(0), reverse = true)
+    case "ZSCAN"            => scan(keys.keys)
+    case "ZSCORE"           => keys.get(args(0))
   }
 
 }

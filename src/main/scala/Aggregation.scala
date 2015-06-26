@@ -31,27 +31,27 @@ trait AggregateCommands extends PayloadProcessing {
    * CommandRunner methods to form its own.
    */
   def runAggregate: CommandRunner = {
-    case "mset"         => argsPaired.foreach {args => route(Seq("set", args._1, args._2))}; SimpleReply()
-    case "msetnx"       => aggregate(Props[AggregateMSetNX])
-    case "mget"         => aggregate(Props[AggregateMGet])
-    case "bitop"        => aggregate(Props[AggregateBitOp])
-    case "dbsize"       => aggregate(Props[AggregateDBSize])
-    case "del"          => aggregate(Props[AggregateDel])
-    case "keys"         => aggregate(Props[AggregateKeys])
-    case "flushdb"      => aggregate(Props[AggregateFlushDB])
-    case "flushall"     => aggregate(Props[AggregateFlushAll])
-    case "pfcount"      => aggregate(Props[AggregateHyperLogLogCount])
-    case "pfmerge"      => aggregate(Props[AggregateHyperLogLogMerge])
-    case "randomkey"    => aggregate(Props[AggregateRandomKey])
-    case "scan"         => aggregate(Props[AggregateScan])
-    case "sdiff"        => aggregate(Props[AggregateSet])
-    case "sinter"       => aggregate(Props[AggregateSet])
-    case "sunion"       => aggregate(Props[AggregateSet])
-    case "sdiffstore"   => aggregate(Props[AggregateSetStore])
-    case "sinterstore"  => aggregate(Props[AggregateSetStore])
-    case "sunionstore"  => aggregate(Props[AggregateSetStore])
-    case "zinterstore"  => aggregate(Props[AggregateSortedSetStore])
-    case "zunionstore"  => aggregate(Props[AggregateSortedSetStore])
+    case "MSET"         => argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}; SimpleReply()
+    case "MSETNX"       => aggregate(Props[AggregateMSetNX])
+    case "MGET"         => aggregate(Props[AggregateMGet])
+    case "BITOP"        => aggregate(Props[AggregateBitOp])
+    case "DBSIZE"       => aggregate(Props[AggregateDBSize])
+    case "DEL"          => aggregate(Props[AggregateDel])
+    case "KEYS"         => aggregate(Props[AggregateKeys])
+    case "FLUSHDB"      => aggregate(Props[AggregateFlushDB])
+    case "FLUSHALL"     => aggregate(Props[AggregateFlushAll])
+    case "PFCOUNT"      => aggregate(Props[AggregateHyperLogLogCount])
+    case "PFMERGE"      => aggregate(Props[AggregateHyperLogLogMerge])
+    case "RANDOMKEY"    => aggregate(Props[AggregateRandomKey])
+    case "SCAN"         => aggregate(Props[AggregateScan])
+    case "SDIFF"        => aggregate(Props[AggregateSet])
+    case "SINTER"       => aggregate(Props[AggregateSet])
+    case "SUNION"       => aggregate(Props[AggregateSet])
+    case "SDIFFSTORE"   => aggregate(Props[AggregateSetStore])
+    case "SINTERSTORE"  => aggregate(Props[AggregateSetStore])
+    case "SUNIONSTORE"  => aggregate(Props[AggregateSetStore])
+    case "ZINTERSTORE"  => aggregate(Props[AggregateSortedSetStore])
+    case "ZUNIONSTORE"  => aggregate(Props[AggregateSortedSetStore])
   }
 
 }
@@ -145,7 +145,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
  * it literally sends GET to each key, sending a list of responses
  * back to the ClientNode.
  */
-class AggregateMGet extends Aggregate[String]("get")
+class AggregateMGet extends Aggregate[String]("GET")
 
 /**
  * Base Aggregate for all of the set operation commands, namely
@@ -156,9 +156,9 @@ class AggregateMGet extends Aggregate[String]("get")
 abstract class AggregateSetReducer[T](command: String) extends Aggregate[T](command) {
   type S = mutable.Set[String]
   lazy val reducer: (S, S) => S = payload.command.tail match {
-    case x if x.startsWith("diff")  => (_ &~ _)
-    case x if x.startsWith("inter") => (_ & _)
-    case x if x.startsWith("union") => (_ | _)
+    case x if x.startsWith("DIFF")  => (_ &~ _)
+    case x if x.startsWith("INTER") => (_ & _)
+    case x if x.startsWith("UNION") => (_ | _)
   }
 }
 
@@ -167,7 +167,7 @@ abstract class AggregateSetReducer[T](command: String) extends Aggregate[T](comm
  * SDIFF/SINTER/SUNION. All it does is define the command used for
  * retrieving all members for each key, namely SMEMBERS.
  */
-abstract class BaseAggregateSet extends AggregateSetReducer[mutable.Set[String]]("smembers")
+abstract class BaseAggregateSet extends AggregateSetReducer[mutable.Set[String]]("SMEMBERS")
 
 /**
  * Aggregate for all of the non-storing set commands, namely
@@ -187,7 +187,7 @@ class AggregateSet extends BaseAggregateSet {
  */
 class AggregateSetStore extends BaseAggregateSet {
   override def complete: Unit =
-    route(Seq("_sstore", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
+    route(Seq("_SSTORE", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
 }
 
 /**
@@ -196,7 +196,7 @@ class AggregateSetStore extends BaseAggregateSet {
  * AggregateSetStore counterpart, given the AGGREGATE/WEIGHTS
  * args it supports.
  */
-class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String, Int]]("_zget") {
+class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String, Int]]("_ZGET") {
 
   /**
    * Position of the AGGREGATE arg in the original Payload.
@@ -256,7 +256,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
       i += 1
       out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
-    route(Seq("_zstore", payload.key) ++ result, destination = payload.destination)
+    route(Seq("_ZSTORE", payload.key) ++ result, destination = payload.destination)
   }
 
 }
@@ -266,7 +266,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
  * AggregateSetStore where the results are reduced then stored,
  * defering the final response to the Node being written to.
  */
-class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
+class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
   override def keys: Seq[String] = args.drop(2)
   override def complete: Unit = {
     val result = args(0).toUpperCase match {
@@ -278,7 +278,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
         val to = ordered(0).lastOption.getOrElse(1) - 1
         mutable.BitSet(from until to: _*) ^ ordered(0)
     }
-    route(Seq("_bstore", args(1)) ++ result, destination = payload.destination)
+    route(Seq("_BSTORE", args(1)) ++ result, destination = payload.destination)
   }
 }
 
@@ -286,7 +286,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_bget") {
  * Aggregate for the PFCOUNT command. Simpy runs HLL count on the Node
  * for each key given, and sums the results.
  */
-class AggregateHyperLogLogCount extends Aggregate[Long]("_pfcount") {
+class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
   override def complete: Long = responses.values.sum
 }
 
@@ -294,10 +294,10 @@ class AggregateHyperLogLogCount extends Aggregate[Long]("_pfcount") {
  * Aggregate for the PFMERGE command. Reduces each HLL with a union
  * operation, storing the final result in the Node for the given key.
  */
-class AggregateHyperLogLogMerge extends Aggregate[HLL]("_pfget") {
+class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
   override def complete: Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
-    route(Seq("_pfstore", payload.key) ++ result, destination = payload.destination)
+    route(Seq("_PFSTORE", payload.key) ++ result, destination = payload.destination)
   }
 }
 
@@ -335,7 +335,7 @@ abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](comma
  * Aggregate for the PUBSUB CHANNELS command/subcommand. Simply builds a
  * list of channels returned.
  */
-class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_channels") {
+class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_CHANNELS") {
   override def broadcastArgs: Seq[String] = Seq(if (args.size == 2) args(1) else "*")
   override def complete: Iterable[String] = responses.values.reduce(_ ++ _)
 }
@@ -344,7 +344,7 @@ class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_cha
  * Aggregate for the PUBSUB NUMSUB command/subcommand. This is a normal
  * Aggregate subclass that simply returns a list of responses.
  */
-class AggregatePubSubNumSub extends Aggregate[Int]("_numsub") {
+class AggregatePubSubNumSub extends Aggregate[Int]("_NUMSUB") {
 
   /**
    * First arg is the NUMSUB subcommand, not a key.
@@ -362,7 +362,7 @@ class AggregatePubSubNumSub extends Aggregate[Int]("_numsub") {
  * Base Aggregate for all commands that need to read lists of keys
  * from each KeyNode actor, namely KEYS/SCAN/DBSIZE.
  */
-abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_keys") {
+abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_KEYS") {
   def reduced: Iterable[String] = responses.values.reduce(_ ++ _)
 }
 
@@ -404,7 +404,7 @@ class AggregateDBSize extends BaseAggregateKeys {
  * each KeyNode has an internal _RANDOMKEY command, and we then draw
  * a random one of these.
  */
-class AggregateRandomKey extends AggregateBroadcast[String]("_randomkey") {
+class AggregateRandomKey extends AggregateBroadcast[String]("_RANDOMKEY") {
   override def complete: String = randomItem(responses.values.filter(_ != ""))
 }
 
@@ -429,7 +429,7 @@ abstract class BaseAggregateBool(command: String) extends AggregateBroadcast[Ite
  * system, but limits the number of messages being sent, which greatly
  * improves performance for large sets of keys.
  */
-class AggregateDel extends BaseAggregateBool("_del") {
+class AggregateDel extends BaseAggregateBool("_DEL") {
 
   /**
    * Payload args are actually keys, even though we're broadcasting.
@@ -448,7 +448,7 @@ class AggregateDel extends BaseAggregateBool("_del") {
  * for each key existing, and only send values to store in Node actors
  * if none of the keys exist, as per the MSETNX command's behavior.
  */
-class AggregateMSetNX extends BaseAggregateBool("exists") {
+class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
 
   /**
    * Every odd arg is a key, and every even arg is a value.
@@ -456,7 +456,7 @@ class AggregateMSetNX extends BaseAggregateBool("exists") {
   override def keys: Seq[String] = payload.argsPaired.map(_._1)
 
   override def complete: Boolean = {
-    if (trues.isEmpty) payload.argsPaired.foreach {args => route(Seq("set", args._1, args._2))}
+    if (trues.isEmpty) payload.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
     trues.isEmpty
   }
 
@@ -474,10 +474,10 @@ abstract class AggregateSimpleReply(command: String) extends AggregateBroadcast[
  * Aggregate for the FLUSHDB command. It simply sends off the
  * corresponding internal command to all KeyNode actors.
  */
-class AggregateFlushDB extends AggregateSimpleReply("_flushdb")
+class AggregateFlushDB extends AggregateSimpleReply("_FLUSHDB")
 
 /**
  * Aggregate for the FLUSHALL command. It simply sends off the
  * corresponding internal command to all KeyNode actors.
  */
-class AggregateFlushAll extends AggregateSimpleReply("_flushall")
+class AggregateFlushAll extends AggregateSimpleReply("_FLUSHALL")

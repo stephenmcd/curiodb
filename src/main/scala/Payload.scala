@@ -14,7 +14,7 @@ import scala.util.Random
  * Main payload for a command - stores its name, type, key, args.
  */
 case class Payload(input: Seq[Any] = Seq(), db: String = "0", destination: Option[ActorRef] = None) {
-  val command = if (input.size > 0) input(0).toString.toLowerCase else ""
+  val command = if (input.size > 0) input(0).toString.toUpperCase else ""
   val nodeType = if (command != "") Commands.nodeType(command) else ""
   val key = if (nodeType != "" && input.size > 1 && Commands.keyed(command)) input(1).toString else ""
   val args = input.drop(if (key == "") 1 else 2).map(_.toString)

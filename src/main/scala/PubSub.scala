@@ -53,7 +53,7 @@ trait PubSubServer extends PayloadProcessing {
     val subscriptions = if (pattern) patterns else channels
     val key = if (pattern) args(0) else payload.key
     val subscriber = payload.destination.get
-    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "subscribe"
+    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "SUBSCRIBE"
     val updated = if (subscribing)
       subscriptions.getOrElseUpdate(key, mutable.Set[ActorRef]()).add(subscriber)
     else
@@ -79,14 +79,14 @@ trait PubSubServer extends PayloadProcessing {
   }
 
   def runPubSub: CommandRunner = {
-    case "_numsub"       => channels.get(payload.key).map(_.size).sum
-    case "_numpat"       => patterns.values.map(_.size).sum
-    case "_channels"     => pattern(channels.keys, args(0))
-    case "_subscribe"    => subscribeOrUnsubscribe
-    case "_unsubscribe"  => subscribeOrUnsubscribe
-    case "_psubscribe"   => subscribeOrUnsubscribe
-    case "_punsubscribe" => subscribeOrUnsubscribe
-    case "publish"       => publish
+    case "_NUMSUB"       => channels.get(payload.key).map(_.size).sum
+    case "_NUMPAT"       => patterns.values.map(_.size).sum
+    case "_CHANNELS"     => pattern(channels.keys, args(0))
+    case "_SUBSCRIBE"    => subscribeOrUnsubscribe
+    case "_UNSUBSCRIBE"  => subscribeOrUnsubscribe
+    case "_PSUBSCRIBE"   => subscribeOrUnsubscribe
+    case "_PUNSUBSCRIBE" => subscribeOrUnsubscribe
+    case "PUBLISH"       => publish
   }
 
 }
@@ -129,8 +129,8 @@ trait PubSubClient extends PayloadProcessing {
    * our channels and patterns that we're unsubscribing.
    */
   override def stop: Unit = {
-    channels.foreach {x => route(Seq("_unsubscribe", x), destination = Some(self))}
-    patterns.foreach {x => route(Seq("_punsubscribe", x), destination = Some(self), broadcast = true)}
+    channels.foreach {x => route(Seq("_UNSUBSCRIBE", x), destination = Some(self))}
+    patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), destination = Some(self), broadcast = true)}
     super.stop
   }
 
@@ -140,14 +140,14 @@ trait PubSubClient extends PayloadProcessing {
    * CommandRunner methods to form its own.
    */
   def runPubSub: CommandRunner = {
-    case "subscribe"    => subscribeOrUnsubscribe
-    case "unsubscribe"  => subscribeOrUnsubscribe
-    case "psubscribe"   => subscribeOrUnsubscribe
-    case "punsubscribe" => subscribeOrUnsubscribe
-    case "pubsub"       => args(0) match {
+    case "SUBSCRIBE"    => subscribeOrUnsubscribe
+    case "UNSUBSCRIBE"  => subscribeOrUnsubscribe
+    case "PSUBSCRIBE"   => subscribeOrUnsubscribe
+    case "PUNSUBSCRIBE" => subscribeOrUnsubscribe
+    case "PUBSUB"       => args(0) match {
       case "channels" => aggregate(Props[AggregatePubSubChannels])
       case "numsub"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
-      case "numpat"   => route(Seq("_numpat", randomString()), destination = payload.destination)
+      case "numpat"   => route(Seq("_NUMPAT", randomString()), destination = payload.destination)
     }
   }
 
@@ -162,7 +162,7 @@ trait PubSubClient extends PayloadProcessing {
   def receivePubSub: Receive = {
     case PubSubEvent(event, channelOrPattern) =>
       val subscriptions = if (event.head == 'p') patterns else channels
-      val subscribing = event.stripPrefix("p") == "subscribe"
+      val subscribing = event.stripPrefix("p") == "SUBSCRIBE"
       val subscribed = subscribing && subscriptions.add(channelOrPattern)
       val unsubscribed = !subscribing && subscriptions.remove(channelOrPattern)
       if (subscribed || unsubscribed) {
