@@ -31,7 +31,7 @@ class StringNode extends Node[String] {
    * Handles calling the EXPIRE/PEXPIRE commands for the SETEX/PSETEX
    * commands.
    */
-  def expire(command: String): Unit = route(Seq(command, payload.key, args(1)))
+  def expire(commandName: String): Unit = route(Seq(commandName, command.key, args(1)))
 
   def run: CommandRunner = {
     case "_RENAME"     => rename(value, "SET")
@@ -131,7 +131,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
 
   /**
    * Shortcut that sets a value, given that the hash key is the first
-   * payload arg.
+   * command arg.
    */
   def set(arg: Any): String = {val x = arg.toString; value(args(0)) = x; x}
 
@@ -163,49 +163,49 @@ class HashNode extends Node[mutable.Map[String, String]] {
  * essentially retry the original blocking command, and if we can
  * perform it (eg pop), we then send the requested value back to
  * the client. This is implemented by storing an ordered set of
- * Payload instances that are blocked, and iterating them each time the
- * next command is run. Timeouts are also supported via the scheduler,
- * which simply removes the blocked Payload from the setm and sends
- * a null response back to the ClientNode.
+ * Command instances that are blocked, and iterating them each time the
+ * next Command is received and processed. Timeouts are also supported
+ * via the scheduler, which simply removes the blocked Command from the
+ * set, and sends a null Response back to the ClientNode.
  */
 class ListNode extends Node[mutable.ArrayBuffer[String]] {
 
   var value = mutable.ArrayBuffer[String]()
 
   /**
-   * Set of blocked Payload instances awaiting a response.
+   * Set of blocked Command instances awaiting a response.
    */
-  var blocked = mutable.LinkedHashSet[Payload]()
+  var blocked = mutable.LinkedHashSet[Command]()
 
   /**
-   * Called on each of the blocking commands, storing the payload
-   * in the blocket set if the list is currently empty, and scheduling
-   * its timeout. Otherwise if the list have items, we just run the
-   * non-blocking version of the command.
+   * Called on each of the blocking commands, storing the received
+   * Command in the blocked set if the list is currently empty, and
+   * scheduling its timeout. Otherwise if the list have items, we just
+   * run the non-blocking version of the command.
    */
   def block: Any = {
     if (value.isEmpty) {
-      blocked += payload
+      blocked += command
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
-        blocked -= payload
+        blocked -= command
         respond(null)
       }
       ()
-    } else run(payload.command.tail)  // Run the non-blocking version.
+    } else run(command.name.tail)  // Run the non-blocking version.
   }
 
   /**
    * Called each time the Node actor's CommandRunner runs - if the
-   * Node actor's list has values and we have blocked payloads, iterate
-   * through the blocked Payload instances and replay their commands.
+   * Node actor's list has values and we have blocked commands, iterate
+   * through the blocked Command instances and replay their commands.
    */
   def unblock(result: Any): Any = {
     while (value.size > 0 && blocked.size > 0) {
-      // Set the node's current payload to the blocked payload, so
-      // that the running command has access to the correct payload.
-      payload = blocked.head
-      blocked -= payload
-      respond(run(payload.command.tail))
+      // Set the node's current Command to the blocked Command, so
+      // that the run method has access to the correct Command.
+      command = blocked.head
+      blocked -= command
+      respond(run(command.name.tail))
     }
     result
   }

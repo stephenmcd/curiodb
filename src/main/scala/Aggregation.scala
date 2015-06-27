@@ -23,7 +23,7 @@ import scala.util.{Success, Failure, Try}
  * which are all defined here. See the base Aggregate class for more
  * detail.
  */
-trait AggregateCommands extends PayloadProcessing {
+trait AggregateCommands extends CommandProcessing {
 
   /**
    * CommandRunner for AggregateCommands, which is given a distinct
@@ -67,13 +67,13 @@ trait AggregateCommands extends PayloadProcessing {
  * The flow of an aggregate command is one where a ClientNode creates
  * a temporary Aggregate actor that lives for the lifecycle of the
  * command being responded to - upon receiving a command, the Aggregate
- * actor breaks the command into the individual key/command/args
+ * actor breaks the command into the individual key/name/args
  * required per key, and sends these on the normal KeyNode -> Node
- * flow, with the Aggregate actor itself being the Payload destination
+ * flow, with the Aggregate actor itself being the Command destination
  * for the response, rather than a CLientNode. The Aggregate actor
  * knows how many responses it requires (usually given by the number of
  * keys/nodes it deals with), and once all nodes have responded, it
- * then constructs the actual Payload response to send back to the
+ * then constructs the command's Response to send back to the
  * ClientNode.
  *
  * The construction of each Aggregate subclass takes a type parameter
@@ -83,7 +83,7 @@ trait AggregateCommands extends PayloadProcessing {
  * Various aspects of the aggregation flow can be controlled by
  * overriding methods.
  */
-abstract class Aggregate[T](val command: String) extends Actor with PayloadProcessing with ActorLogging {
+abstract class Aggregate[T](val commandName: String) extends Actor with CommandProcessing with ActorLogging {
 
   /**
    * Typically the initial keys mapped to responses sent back from each
@@ -96,7 +96,7 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
 
   /**
    * Ordered set of keys dealt with by the aggregation, defaulting to
-   * the original Payload args of the command received.
+   * the original Command args of the command received.
    */
   def keys: Seq[String] = args
 
@@ -111,28 +111,28 @@ abstract class Aggregate[T](val command: String) extends Actor with PayloadProce
   def complete: Any = ordered
 
   /**
-   * Starts the aggregation process by sending a Payload containing
+   * Starts the aggregation process by sending a Command containing
    * the Aggregate subclass instance's command, for each key in the
-   * originating Payload.
+   * originating Command.
    */
-  def begin = keys.foreach {key => route(Seq(command, key), destination = Some(self))}
+  def begin = keys.foreach {key => route(Seq(commandName, key), destination = Some(self))}
 
   /**
-   * Starts the aggregation process when the original Payload is first
+   * Starts the aggregation process when the original Command is first
    * received, and receives each Node response afterwards, until all
    * responses have arrived, at which point the final response for the
    * ClientNode is constructed and sent back, and the Aggregate actor
    * is shut down.
    */
   def receive: Receive = LoggingReceive {
-    case p: Payload => payload = p; begin
+    case c: Command => command = c; begin
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
       if (responses.size == keys.size) {
         respond(Try(complete) match {
           case Success(response) => response
-          case Failure(e) => log.error(e, s"Error running: $payload"); ErrorReply
+          case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply
         })
         stop
       }
@@ -153,9 +153,9 @@ class AggregateMGet extends Aggregate[String]("GET")
  * simply defines the set operation based on the command name, that
  * will be used in subclasses to reduce the results to a single set.
  */
-abstract class AggregateSetReducer[T](command: String) extends Aggregate[T](command) {
+abstract class AggregateSetReducer[T](commandName: String) extends Aggregate[T](commandName) {
   type S = mutable.Set[String]
-  lazy val reducer: (S, S) => S = payload.command.tail match {
+  lazy val reducer: (S, S) => S = command.name.tail match {
     case x if x.startsWith("DIFF")  => (_ &~ _)
     case x if x.startsWith("INTER") => (_ & _)
     case x if x.startsWith("UNION") => (_ | _)
@@ -187,7 +187,7 @@ class AggregateSet extends BaseAggregateSet {
  */
 class AggregateSetStore extends BaseAggregateSet {
   override def complete: Unit =
-    route(Seq("_SSTORE", payload.key) ++ ordered.reduce(reducer), destination = payload.destination)
+    route(Seq("_SSTORE", command.key) ++ ordered.reduce(reducer), destination = command.destination)
 }
 
 /**
@@ -199,23 +199,23 @@ class AggregateSetStore extends BaseAggregateSet {
 class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String, Int]]("_ZGET") {
 
   /**
-   * Position of the AGGREGATE arg in the original Payload.
+   * Position of the AGGREGATE arg in the original Command.
    */
   lazy val aggregatePos = argsUpper.indexOf("AGGREGATE")
 
   /**
-   * Value of the AGGREGATE arg in the original Payload.
+   * Value of the AGGREGATE arg in the original Command.
    */
   lazy val aggregateName = if (aggregatePos == -1) "SUM" else argsUpper(aggregatePos + 1)
 
   /**
-   * Postition of the WEIGHT arg in the original Payload.
+   * Postition of the WEIGHT arg in the original Command.
    */
   lazy val weightPos = argsUpper.indexOf("WEIGHTS")
 
   /**
    * The actual operation that will be performed given the AGGREGATE
-   * arg in the original Payload.
+   * arg in the original Command.
    */
   lazy val aggregate: (Int, Int) => Int = aggregateName match {
     case "SUM" => (_ + _)
@@ -230,14 +230,14 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
 
   /**
    * Sorted Set aggregate commands define a required arg that
-   * specifies the number of keys in the Payload - here we use
+   * specifies the number of keys in the Command - here we use
    * that to pull out the keys.
    */
   override def keys: Seq[String] = args.slice(1, args(0).toInt + 1)
 
   /**
    * Reduces results based on the AGGREGATE/WEIGHT args in the original
-   * Payload, storing the reduced results in the appropriate Node,
+   * Command, storing the reduced results in the appropriate Node,
    * and aborting sending a response which will be handled by the final
    * Node being written to.
    */
@@ -256,7 +256,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
       i += 1
       out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
-    route(Seq("_ZSTORE", payload.key) ++ result, destination = payload.destination)
+    route(Seq("_ZSTORE", command.key) ++ result, destination = command.destination)
   }
 
 }
@@ -278,7 +278,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
         val to = ordered(0).lastOption.getOrElse(1) - 1
         mutable.BitSet(from until to: _*) ^ ordered(0)
     }
-    route(Seq("_BSTORE", args(1)) ++ result, destination = payload.destination)
+    route(Seq("_BSTORE", args(1)) ++ result, destination = command.destination)
   }
 }
 
@@ -297,7 +297,7 @@ class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
 class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
   override def complete: Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
-    route(Seq("_PFSTORE", payload.key) ++ result, destination = payload.destination)
+    route(Seq("_PFSTORE", command.key) ++ result, destination = command.destination)
   }
 }
 
@@ -310,13 +310,13 @@ class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
  * As these commands don't deal with keys, define keys to means an
  * incremental integer, one for each KeyNode actor in the system.
  */
-abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](command) {
+abstract class AggregateBroadcast[T](commandName: String) extends Aggregate[T](commandName) {
 
   /**
-   * These are the args we'll use in the Payload that is broadcast to
+   * These are the args we'll use in the Command that is broadcast to
    * all KeyNode actors, since keys is overtaken in meaning.
    */
-  def broadcastArgs: Seq[String] = payload.args
+  def broadcastArgs: Seq[String] = command.args
 
   /**
    * For keys we use a range of integers, one for each KeyNode actor in
@@ -325,9 +325,9 @@ abstract class AggregateBroadcast[T](command: String) extends Aggregate[T](comma
   override def keys: Seq[String] = (1 to context.system.settings.config.getInt("curiodb.keynodes")).map(_.toString)
 
   /**
-   * Constructs the broadcast Payload for each KeyNode actor.
+   * Constructs the broadcast Command for each KeyNode actor.
    */
-  override def begin: Unit = route(command +: broadcastArgs, destination = Some(self), broadcast = true)
+  override def begin: Unit = route(commandName +: broadcastArgs, destination = Some(self), broadcast = true)
 
 }
 
@@ -382,7 +382,7 @@ class AggregateScan extends BaseAggregateKeys {
   /**
    * We need all keys returned so that we can locally apply the scan,
    * so here we specify the wildcard arg for each KeyNode actor's
-   * Payload.
+   * Command.
    */
   override def broadcastArgs: Seq[String] = Seq("*")
 
@@ -412,7 +412,7 @@ class AggregateRandomKey extends AggregateBroadcast[String]("_RANDOMKEY") {
  * Base Aggregate for commands that deal with boolean responses from
  * each KeyNode actor, namely DEL/EXISTS/MSETNX.
  */
-abstract class BaseAggregateBool(command: String) extends AggregateBroadcast[Iterable[Boolean]](command) {
+abstract class BaseAggregateBool(commandName: String) extends AggregateBroadcast[Iterable[Boolean]](commandName) {
 
   /**
    * Returns all the true responses.
@@ -432,9 +432,9 @@ abstract class BaseAggregateBool(command: String) extends AggregateBroadcast[Ite
 class AggregateDel extends BaseAggregateBool("_DEL") {
 
   /**
-   * Payload args are actually keys, even though we're broadcasting.
+   * Command args are actually keys, even though we're broadcasting.
    */
-  override def broadcastArgs: Seq[String] = payload.args
+  override def broadcastArgs: Seq[String] = command.args
 
   /**
    * Each key that actually belong to a KeyNode will return true.
@@ -453,10 +453,10 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
   /**
    * Every odd arg is a key, and every even arg is a value.
    */
-  override def keys: Seq[String] = payload.argsPaired.map(_._1)
+  override def keys: Seq[String] = command.argsPaired.map(_._1)
 
   override def complete: Boolean = {
-    if (trues.isEmpty) payload.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
+    if (trues.isEmpty) command.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
     trues.isEmpty
   }
 
@@ -466,7 +466,7 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
  * Base Aggregate for commands that don't need data for a reply, namely
  * FLUSHDB/FLUSHALL.
  */
-abstract class AggregateSimpleReply(command: String) extends AggregateBroadcast[String](command) {
+abstract class AggregateSimpleReply(commandName: String) extends AggregateBroadcast[String](commandName) {
   override def complete: SimpleReply = SimpleReply()
 }
 

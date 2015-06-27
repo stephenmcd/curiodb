@@ -31,7 +31,7 @@ case class PubSubEvent(event: String, channelOrPattern: String)
  * on *every* KeyNode. Patterns are stored in the same way as channels,
  * with patterns mapped to ActorRef values for ClientNode actors.
  */
-trait PubSubServer extends PayloadProcessing {
+trait PubSubServer extends CommandProcessing {
 
   /**
    * Client subscriptions to channels.
@@ -49,17 +49,17 @@ trait PubSubServer extends PayloadProcessing {
    * ClientNode when a change in subscription occurs.
    */
   def subscribeOrUnsubscribe: Unit = {
-    val pattern = payload.command.startsWith("_p")
+    val pattern = command.name.startsWith("_p")
     val subscriptions = if (pattern) patterns else channels
-    val key = if (pattern) args(0) else payload.key
-    val subscriber = payload.destination.get
-    val subscribing = payload.command.drop(if (pattern) 2 else 1) == "SUBSCRIBE"
+    val key = if (pattern) args(0) else command.key
+    val subscriber = command.destination.get
+    val subscribing = command.name.drop(if (pattern) 2 else 1) == "SUBSCRIBE"
     val updated = if (subscribing)
       subscriptions.getOrElseUpdate(key, mutable.Set[ActorRef]()).add(subscriber)
     else
       !subscriptions.get(key).filter(_.remove(subscriber)).isEmpty
     if (!subscribing && updated && subscriptions(key).isEmpty) subscriptions -= key
-    if (updated) subscriber ! PubSubEvent(payload.command.tail, key)
+    if (updated) subscriber ! PubSubEvent(command.name.tail, key)
   }
 
   /**
@@ -67,19 +67,19 @@ trait PubSubServer extends PayloadProcessing {
    * to all matching subscriptions - either channels, or patterns.
    */
   def publish: Int = {
-    channels.get(payload.key).map({subscribers =>
-      val message = Response(payload.key, Seq("message", payload.key, args(0)))
+    channels.get(command.key).map({subscribers =>
+      val message = Response(command.key, Seq("message", command.key, args(0)))
       subscribers.foreach(_ ! message)
       subscribers.size
-    }).sum + patterns.filterKeys(!pattern(Seq(payload.key), _).isEmpty).map({entry =>
-      val message = Response(payload.key, Seq("pmessage", entry._1, payload.key, args(0)))
+    }).sum + patterns.filterKeys(!pattern(Seq(command.key), _).isEmpty).map({entry =>
+      val message = Response(command.key, Seq("pmessage", entry._1, command.key, args(0)))
       entry._2.foreach(_ ! message)
       entry._2.size
     }).sum
   }
 
   def runPubSub: CommandRunner = {
-    case "_NUMSUB"       => channels.get(payload.key).map(_.size).sum
+    case "_NUMSUB"       => channels.get(command.key).map(_.size).sum
     case "_NUMPAT"       => patterns.values.map(_.size).sum
     case "_CHANNELS"     => pattern(channels.keys, args(0))
     case "_SUBSCRIBE"    => subscribeOrUnsubscribe
@@ -99,7 +99,7 @@ trait PubSubServer extends PayloadProcessing {
  * to, similar to the way PubSubServer maps these to ClientNode
  * ActorRef instances.
 */
-trait PubSubClient extends PayloadProcessing {
+trait PubSubClient extends CommandProcessing {
 
   /**
    * Channels subscribed to.
@@ -116,15 +116,15 @@ trait PubSubClient extends PayloadProcessing {
    * namely SUBSCRIBE/UNSUBSCRIBE/PSUBSCRIBE/PUNSUBSCRIBE.
    */
   def subscribeOrUnsubscribe: Unit = {
-    val pattern = payload.command.head == 'p'
+    val pattern = command.name.head == 'p'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
-    xs.foreach {x => route(Seq("_" + payload.command, x), destination = payload.destination, broadcast = pattern)}
+    xs.foreach {x => route(Seq("_" + command.name, x), destination = command.destination, broadcast = pattern)}
   }
 
 
   /**
-   * Here we override the stop method used by PayloadProcessing, which
+   * Here we override the stop method used by CommandProcessing, which
    * allows us to inform the KeyNode actors holding subscriptions to
    * our channels and patterns that we're unsubscribing.
    */
@@ -147,7 +147,7 @@ trait PubSubClient extends PayloadProcessing {
     case "PUBSUB"       => args(0) match {
       case "channels" => aggregate(Props[AggregatePubSubChannels])
       case "numsub"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
-      case "numpat"   => route(Seq("_NUMPAT", randomString()), destination = payload.destination)
+      case "numpat"   => route(Seq("_NUMPAT", randomString()), destination = command.destination)
     }
   }
 

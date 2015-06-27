@@ -28,11 +28,11 @@ import scala.util.{Success, Failure, Try}
  *
  *  - Its data value, typed by the type parameter that concrete
  *    subclasses must define.
- *  - Execution of the node's CommandRunner each time a Payload is
+ *  - Execution of the node's CommandRunner each time a Command is
  *    received.
  *  - Optionally persisting the node's value to disk (snapshotting)
- *    after a command has been handled (point 2 above), cleaning up
- *    older snapshots, and restoring from a snapshot on startup.
+ *    after a command has been handled (second point above), cleaning
+ *    up older snapshots, and restoring from a snapshot on startup.
  *
  * Persistence warrants some discussion: we use akka-persistence, but
  * not completely, as event-sourcing is not used, and we rely entirely
@@ -51,7 +51,7 @@ import scala.util.{Success, Failure, Try}
  * var stores whether persisting has been scheduled, to allow extra
  * save calls to do nothing when persisting has already been scheduled.
  */
-abstract class Node[T] extends PersistentActor with PayloadProcessing with ActorLogging {
+abstract class Node[T] extends PersistentActor with CommandProcessing with ActorLogging {
 
   /**
    * Actual data value for the node.
@@ -125,7 +125,7 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
 
   /**
    * Main Receive handler - deals with starting/stopping/persisting,
-   * and receiving Payload instances, then running the Node actor's
+   * and receiving Command instances, then running the Node actor's
    * CommandRunner.
    */
   def receiveCommand: Receive = {
@@ -134,11 +134,11 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
     case Persist    => persisting = false; saveSnapshot(value)
     case Delete     => deleteOldSnapshots(stopping = true); stop
     case Sleep      => stop
-    case p: Payload =>
-      payload = p
-      respond(Try(run(payload.command)) match {
-        case Success(response) => if (Commands.writes(payload.command)) save; response
-        case Failure(e) => log.error(e, s"Error running: $payload"); ErrorReply("Unknown error")
+    case c: Command =>
+      command = c
+      respond(Try(run(command.name)) match {
+        case Success(response) => if (Commands.writes(command.name)) save; response
+        case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply("Unknown error")
       })
   }
 
@@ -155,8 +155,8 @@ abstract class Node[T] extends PersistentActor with PayloadProcessing with Actor
    * command to  what will be a newly created Node.
    */
   def rename(fromValue: Any, toCommand: String): Unit =
-    if (payload.key != args(0)) {
-      route(Seq("_DEL", payload.key))
+    if (command.key != args(0)) {
+      route(Seq("_DEL", command.key))
       route(Seq(toCommand, args(0)) ++ (fromValue match {
         case x: Iterable[Any] => x
         case x => Seq(x)
@@ -290,17 +290,17 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   /**
    * Shortcut for grabbing the String/NodeEntry map (aka DB) for the
-   * current payload.
+   * current Command.
    */
-  def db: DB = dbFor(payload.db)
+  def db: DB = dbFor(command.db)
 
   /**
    * Cancels expiry on a node when the PERSIST command is run.
    */
-  def persist: Int = db(payload.key).expiry match {
+  def persist: Int = db(command.key).expiry match {
     case Some((_, cancellable)) =>
       cancellable.cancel()
-      db(payload.key).expiry = None
+      db(command.key).expiry = None
       1
     case None => 0
   }
@@ -313,9 +313,9 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     persist
     val expires = (when - System.currentTimeMillis).toInt milliseconds
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
-      self ! Payload(Seq("_DEL", payload.key), db = payload.db)
+      self ! Command(Seq("_DEL", command.key), db = command.db)
     }
-    db(payload.key).expiry = Some((when, cancellable))
+    db(command.key).expiry = Some((when, cancellable))
     1
   }
 
@@ -330,7 +330,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   def sleep: Unit = {
     val when = sleepAfter milliseconds
-    val key = payload.key
+    val key = command.key
     val entry = db(key)
     entry.sleep.foreach(_.cancel())
     entry.sleep = Some(context.system.scheduler.scheduleOnce(when) {
@@ -345,7 +345,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Retrieves the milliseconds remaining until expiry occurs for a key
    * when the TTL/PTTL commands are run.
    */
-  def ttl: Long = db(payload.key).expiry match {
+  def ttl: Long = db(command.key).expiry match {
     case Some((when, _)) => when - System.currentTimeMillis
     case None => -1
   }
@@ -357,17 +357,17 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * of Node.
    */
   def sort: Any = {
-      val entry = db(payload.key)
+      val entry = db(command.key)
       entry.nodeType match {
         case "list" | "set" | "sortedset" =>
-          val sortArgs = Seq("_SORT", payload.key) ++ payload.args
-          entry.node.get ! Payload(sortArgs, db = payload.db, destination = payload.destination)
+          val sortArgs = Seq("_SORT", command.key) ++ command.args
+          entry.node.get ! Command(sortArgs, db = command.db, destination = command.destination)
         case _ => wrongType
       }
   }
 
   /**
-   * Validates that the key and command for the current Payload can be
+   * Validates that the key and command for the current Command can be
    * run. This boils down to ensuring the command belongs to the type
    * of Node mapped to the key, and that the Node must or musn't exist,
    * given the particular command. Optionally returns an error, or a
@@ -377,13 +377,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Node.
    */
   def validate: Option[Any] = {
-    val exists      = db.contains(payload.key)
-    val nodeType    = if (exists) db(payload.key).nodeType else ""
-    val invalidType = (nodeType != "" && payload.nodeType != nodeType &&
-      payload.nodeType != "keys" && !Commands.overwrites(payload.command))
-    val cantExist   = payload.command == "LPUSHX" || payload.command == "RPUSHX"
-    val mustExist   = payload.command == "SETNX"
-    val default     = Commands.default(payload.command, payload.args)
+    val exists      = db.contains(command.key)
+    val nodeType    = if (exists) db(command.key).nodeType else ""
+    val invalidType = (nodeType != "" && command.nodeType != nodeType &&
+      command.nodeType != "keys" && !Commands.overwrites(command.name))
+    val cantExist   = command.name == "LPUSHX" || command.name == "RPUSHX"
+    val mustExist   = command.name == "SETNX"
+    val default     = Commands.default(command.name, command.args)
     if (invalidType)
       Some(wrongType)
     else if ((exists && cantExist) || (!exists && mustExist))
@@ -395,16 +395,16 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
   }
 
   /**
-   * Shortcut for retrieving the ActorRef for the current payload.
+   * Shortcut for retrieving the ActorRef for the current Command.
    * Creates a new actor if the key is sleeping or doesn't exist.
    */
   def node: ActorRef = {
-    if (payload.nodeType == "keys")
+    if (command.nodeType == "keys")
       self
     else
-      db.get(payload.key).flatMap(_.node) match {
+      db.get(command.key).flatMap(_.node) match {
         case Some(node) => node
-        case None => create(payload.db, payload.key, payload.nodeType).get
+        case None => create(command.db, command.key, command.nodeType).get
       }
   }
 
@@ -433,13 +433,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Deletes a Node.
    */
   def delete(key: String, dbName: Option[String] = None): Boolean =
-    dbFor(dbName.getOrElse(payload.db)).remove(key) match {
+    dbFor(dbName.getOrElse(command.db)).remove(key) match {
       case Some(entry) => entry.node.foreach(_ ! Delete); true
       case None => false
     }
 
   override def run: CommandRunner = ({
-    case "_DEL"          => (payload.key +: args).map(key => delete(key))
+    case "_DEL"          => (command.key +: args).map(key => delete(key))
     case "_KEYS"         => pattern(db.keys, args(0))
     case "_RANDOMKEY"    => randomItem(db.keys)
     case "_FLUSHDB"      => db.keys.map(key => delete(key)); SimpleReply()
@@ -451,9 +451,9 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "PEXPIRE"       => expire(System.currentTimeMillis + args(0).toInt)
     case "EXPIREAT"      => expire(args(0).toLong / 1000)
     case "PEXPIREAT"     => expire(args(0).toLong)
-    case "TYPE"          => if (db.contains(payload.key)) db(payload.key).nodeType else null
-    case "RENAMENX"      => val x = db.contains(payload.key); if (x) {run("RENAME")}; x
-    case "RENAME"        => db(payload.key).node.foreach(_ ! Payload(Seq("_RENAME", payload.key, args(0)), db = payload.db)); SimpleReply()
+    case "TYPE"          => if (db.contains(command.key)) db(command.key).nodeType else null
+    case "RENAMENX"      => val x = db.contains(command.key); if (x) {run("RENAME")}; x
+    case "RENAME"        => db(command.key).node.foreach(_ ! Command(Seq("_RENAME", command.key, args(0)), db = command.db)); SimpleReply()
     case "PERSIST"       => persist
     case "SORT"          => sort
   }: CommandRunner) orElse runPubSub
@@ -464,13 +464,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * CommandRunner for the KeyNode.
    */
   override def receiveCommand: Receive = ({
-    case Routable(p) => payload = p; validate match {
+    case Routable(p) => command = p; validate match {
       case Some(errorOrDefault) => respond(errorOrDefault)
       case None =>
-        val overwrite = !db.get(payload.key).filter(_.nodeType != payload.nodeType).isEmpty
-        if (Commands.overwrites(payload.command) && overwrite) delete(payload.key)
-        node ! payload
-        if (payload.command match {
+        val overwrite = !db.get(command.key).filter(_.nodeType != command.nodeType).isEmpty
+        if (Commands.overwrites(command.name) && overwrite) delete(command.key)
+        node ! command
+        if (command.name match {
           case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" => false
           case _ => sleepEnabled
         }) sleep
@@ -495,8 +495,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
  * represent any key/value provided by a client, but instead is
  * responsible for managing the lifecycle of a single client
  * connection. Its main role in doing this is to receive messages,
- * parse the Redis protocol into a Payload which is sent onto a
- * KeyNode or Aggrgate actor, and await a reply which it then
+ * parse the Redis protocol into a Command instance, which is sent onto
+ * a KeyNode or Aggrgate actor, and await a reply which it then
  * converts back into the Redis protocol before sending it to the
  * client. ClientNode takes on the role of a Node, as there are a
  * variety of commands that logically belong to it.
@@ -522,7 +522,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
    * Stores the current DB name - default, or one provided by the
    * SELECT command.
    */
-  var db = payload.db
+  var db = command.db
 
   /**
    * End of line marker used in parsing/writing Redis protocol.
@@ -539,17 +539,17 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
   }: CommandRunner) orElse runPubSub orElse runAggregate
 
   /**
-   * Performs initial Payload validation before sending anywhere,
-   * as per the Payload command's definition in commands.conf, namely
-   * that the command belongs to a type of Node, it contains a key if
-   * required, and the range of arguments provided match the command.
+   * Performs initial Command validation before sending anywhere,
+   * as per the command's definition in commands.conf, namely that the
+   * command belongs to a type of Node, it contains a key if required,
+   * and the range of arguments provided match the command.
    */
   def validate: Option[ErrorReply] = {
-    if (payload.nodeType == "")
-      Some(ErrorReply(s"unknown command '${payload.command}'"))
-    else if ((payload.key == "" && Commands.keyed(payload.command))
-        || !Commands.argsInRange(payload.command, payload.args))
-      Some(ErrorReply(s"wrong number of arguments for '${payload.command}' command"))
+    if (command.nodeType == "")
+      Some(ErrorReply(s"unknown command '${command.name}'"))
+    else if ((command.key == "" && Commands.keyed(command.name))
+        || !Commands.argsInRange(command.name, command.args))
+      Some(ErrorReply(s"wrong number of arguments for '${command.name}' command"))
     else
       None
   }
@@ -613,15 +613,15 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
       var parsed: Option[Seq[String]] = None
       buffer.append(data.utf8String)
       while ({parsed = parseBuffer; parsed.isDefined}) {
-        payload = Payload(parsed.get, db = db, destination = Some(self))
+        command = Command(parsed.get, db = db, destination = Some(self))
         client = Some(sender())
         validate match {
           case Some(error) => respond(error)
           case None =>
-            if (payload.nodeType == "client")
-              self ! payload
+            if (command.nodeType == "client")
+              self ! command
             else
-              route(clientPayload = Option(payload))
+              route(clientCommand = Option(command))
         }
       }
 
