@@ -381,15 +381,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     val nodeType    = if (exists) db(command.key).nodeType else ""
     val invalidType = (nodeType != "" && command.nodeType != nodeType &&
       command.nodeType != "keys" && !Commands.overwrites(command.name))
-    val cantExist   = command.name == "LPUSHX" || command.name == "RPUSHX"
-    val mustExist   = command.name == "SETNX"
+    val mustExist   = command.name == "LPUSHX" || command.name == "RPUSHX"
+    val cantExist   = command.name == "SETNX"
     val default     = Commands.default(command.name, command.args)
     if (invalidType)
       Some(wrongType)
-    else if ((exists && cantExist) || (!exists && mustExist))
-      Some(0)
-    else if (!exists && default != ())
-      Some(default)
+    else if ((exists && cantExist) || (!exists && mustExist) || (!exists && !cantExist && default != ()))
+      Some(if (default != ()) default else 0)
     else
       None
   }
