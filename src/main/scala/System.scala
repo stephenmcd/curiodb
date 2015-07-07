@@ -470,7 +470,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
         node ! command
         if (command.name match {
           case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" => false
-          case _ => sleepEnabled
+          case _ => sleepEnabled && Commands.keyed(command.name)
         }) sleep
     }
   }: Receive) orElse super.receiveCommand
