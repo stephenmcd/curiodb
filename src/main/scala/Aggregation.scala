@@ -410,8 +410,28 @@ class AggregateRandomKey extends AggregateBroadcast[String]("_RANDOMKEY") {
 
 /**
  * Base Aggregate for commands that deal with boolean responses from
- * each KeyNode actor, namely DEL/EXISTS/MSETNX.
- */
+ * each KeyNode actor, namely DEL/MSETNX.
+ *
+ * There are two ways this could be implemented, considering both
+ * commands accept multiple keys, and we don't know which KeyNode
+ * instances the keys belong to. The first approach, which we don't
+ * use, would be to send individual messages per keys, each with a
+ * single command and key - this would ensure each KeyNode only
+ * receives the keys it manages, but would mean a large number of
+ * messages given a large number of keys.
+ *
+ * Instead we opt for a different approach which is an unintuitive
+ * performance consideration - what we do is broadcast *all* keys
+ * in the original command to *all* KeyNode instances. We can do this
+ * because in each case (DEL/MSETNX) we're only interested in the
+ * "true" values returned from each KeyNode, and these are only given
+ * for valid keys (eg keys that belong to the KeyNode). So wwe get
+ * a bunch of extranous "false" values in the responses, for each key
+ * that didn't actually belong to a KeyNode, but this has no affect
+ * on the final result for DEL/MSETNX. The end result here is that we
+ * only send a message per KeyNode instead of a message per key,
+ * which performs incredibly better, even though we send a ton of
+ * redundant keys around. */
 abstract class BaseAggregateBool(commandName: String) extends AggregateBroadcast[Iterable[Boolean]](commandName) {
 
   /**
@@ -422,12 +442,7 @@ abstract class BaseAggregateBool(commandName: String) extends AggregateBroadcast
 }
 
 /**
- * Aggregate for the DEL command. There's an unintuitive performance
- * consideration here - rather than sending a message per key, we
- * broadcast all keys to all KeyNode actors, and allow them to ignore
- * keys they don't manage. This means more data travelling through the
- * system, but limits the number of messages being sent, which greatly
- * improves performance for large sets of keys.
+ * Aggregate for the DEL command.
  */
 class AggregateDel extends BaseAggregateBool("_DEL") {
 
@@ -453,7 +468,7 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
   /**
    * Every odd arg is a key, and every even arg is a value.
    */
-  override def keys: Seq[String] = command.argsPaired.map(_._1)
+  override def broadcastArgs: Seq[String] = command.argsPaired.map(_._1)
 
   override def complete: Boolean = {
     if (trues.isEmpty) command.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
