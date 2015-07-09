@@ -425,13 +425,14 @@ class AggregateRandomKey extends AggregateBroadcast[String]("_RANDOMKEY") {
  * in the original command to *all* KeyNode instances. We can do this
  * because in each case (DEL/MSETNX) we're only interested in the
  * "true" values returned from each KeyNode, and these are only given
- * for valid keys (eg keys that belong to the KeyNode). So wwe get
- * a bunch of extranous "false" values in the responses, for each key
- * that didn't actually belong to a KeyNode, but this has no affect
- * on the final result for DEL/MSETNX. The end result here is that we
+ * for valid keys (eg keys that belong to the KeyNode). So we get
+ * a bunch of extraneous "false" values in the responses, for each key
+ * that didn't actually belong to a KeyNode, but this does not affect
+ * the final result for DEL/MSETNX. The end result here is that we
  * only send a message per KeyNode instead of a message per key,
  * which performs incredibly better, even though we send a ton of
- * redundant keys around. */
+ * redundant keys around.
+ */
 abstract class BaseAggregateBool(commandName: String) extends AggregateBroadcast[Iterable[Boolean]](commandName) {
 
   /**
