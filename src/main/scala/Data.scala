@@ -340,7 +340,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
    * Increments score for a key by retrieving it, removing it and
    * re-adding it.
    */
-  def increment(key: String, by: Float): Float = {
+  def increment(by: Float, key: String): String = {
     val score = (if (keys.containsKey(key)) keys.get(key) else 0) + by
     remove(key)
     add(score, key)
@@ -435,7 +435,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
     case "ZADD"             => argsPaired.map(arg => add(arg._1.toFloat, arg._2)).filter(x => x).size
     case "ZCARD"            => keys.size
     case "ZCOUNT"           => rangeByScore(args(0), args(1)).size
-    case "ZINCRBY"          => increment(args(0), args(1).toFloat)
+    case "ZINCRBY"          => increment(args(0).toFloat, args(1))
     case "ZLEXCOUNT"        => rangeByKey(args(0), args(1)).size
     case "ZRANGE"           => rangeByIndex(args(0), args(1))
     case "ZRANGEBYLEX"      => rangeByKey(args(0), args(1))
