@@ -249,6 +249,16 @@ trait CommandProcessing extends Actor {
     if (iterable.isEmpty) "" else iterable.toSeq(Random.nextInt(iterable.size))
 
   /**
+   * Utility for dropping extraneous zeros from floats when converting to
+   * strings, for consistency with Redis' INCRBYFLOAT/HINCRBYFLOAT commands
+   * and sorted set scores.
+   */
+  def numberToString(n: Any): String = {
+    val s = n.toString
+    if (s.takeRight(2) == ".0") s.dropRight(2) else s
+  }
+
+  /**
    * Utility for generating a random string.
    */
   def randomString(length: Int = 5): String = Random.alphanumeric.take(length).mkString

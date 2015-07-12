@@ -4,3 +4,4 @@ syntax: glob
 target/*
 application.conf
 .idea/*
+*.rdb

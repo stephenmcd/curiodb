@@ -45,7 +45,7 @@ class StringNode extends Node[String] {
     case "STRLEN"      => value.size
     case "INCR"        => value = (valueOrZero.toInt + 1).toString; value.toInt
     case "INCRBY"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
-    case "INCRBYFLOAT" => value = (valueOrZero.toFloat + args(0).toFloat).toString; value
+    case "INCRBYFLOAT" => value = numberToString(valueOrZero.toFloat + args(0).toFloat); value
     case "DECR"        => value = (valueOrZero.toInt - 1).toString; value.toInt
     case "DECRBY"      => value = (valueOrZero.toInt - args(0).toInt).toString; value.toInt
     case "SETEX"       => val x = run("SET"); expire("EXPIRE"); x
@@ -133,7 +133,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
    * Shortcut that sets a value, given that the hash key is the first
    * command arg.
    */
-  def set(arg: Any): String = {val x = arg.toString; value(args(0)) = x; x}
+  def set(arg: Any): String = {val x = numberToString(arg); value(args(0)) = x; x}
 
   override def run: CommandRunner = {
     case "_RENAME"      => rename(run("HGETALL"), "_HSTORE")
@@ -274,7 +274,7 @@ class SetNode extends Node[mutable.Set[String]] {
  * A SortedSetEntry is stored for each value in a SortedSetNode. It's
  * essentially a score/key pair which is Ordered.
  */
-case class SortedSetEntry(score: Int, key: String = "")(implicit ordering: Ordering[(Int, String)])
+case class SortedSetEntry(score: Float, key: String = "")(implicit ordering: Ordering[(Float, String)])
     extends Ordered[SortedSetEntry] {
   def compare(that: SortedSetEntry): Int =
     ordering.compare((this.score, this.key), (that.score, that.key))
@@ -296,18 +296,18 @@ case class SortedSetEntry(score: Int, key: String = "")(implicit ordering: Order
  * We actually store both score and key (see SortedSetEntry above),
  * which provides ordering by score then by key.
  */
-class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[SortedSetEntry])] {
+class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[SortedSetEntry])] {
 
   /**
    * Actual value is a two item tuple, map of keys to scores, and set
    * of score/key entries.
    */
-  var value = (new IndexedTreeMap[String, Int](), new IndexedTreeSet[SortedSetEntry]())
+  var value = (new IndexedTreeMap[String, Float](), new IndexedTreeSet[SortedSetEntry]())
 
   /**
    * Shortcut to mapping of keys to scores.
    */
-  def keys: IndexedTreeMap[String, Int] = value._1
+  def keys: IndexedTreeMap[String, Float] = value._1
 
   /**
    * Shortcut to set of score/key entries.
@@ -317,7 +317,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
   /**
    * Adds key/score to both structures.
    */
-  def add(score: Int, key: String): Boolean = {
+  def add(score: Float, key: String): Boolean = {
     val exists = remove(key)
     keys.put(key, score)
     scores.add(SortedSetEntry(score, key))
@@ -340,11 +340,11 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
    * Increments score for a key by retrieving it, removing it and
    * re-adding it.
    */
-  def increment(key: String, by: Int): Int = {
+  def increment(key: String, by: Float): Float = {
     val score = (if (keys.containsKey(key)) keys.get(key) else 0) + by
     remove(key)
     add(score, key)
-    score
+    numberToString(score)
   }
 
   /**
@@ -367,7 +367,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     var result = scores.subSet(from, true, to, true).toSeq
     result = limit[SortedSetEntry](if (reverse) result.reverse else result)
     if (argsUpper.contains("WITHSCORES"))
-      result.flatMap(x => Seq(x.key, x.score.toString))
+      result.flatMap(x => Seq(x.key, numberToString(x.score)))
     else
       result.map(_.key)
   }
@@ -389,11 +389,11 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
    * supports the infinite/inclusive/exclusive syntax.
    */
   def rangeByScore(from: String, to: String, reverse: Boolean = false): Seq[String] = {
-    def parse(arg: String, dir: Int) = arg match {
+    def parse(arg: String, dir: Float) = arg match {
       case "-inf" => if (scores.isEmpty) 0 else scores.first().score
       case "+inf" => if (scores.isEmpty) 0 else scores.last().score
-      case arg if arg.startsWith("(") => arg.toInt + dir
-      case _ => arg.toInt
+      case arg if arg.startsWith("(") => arg.toFloat + dir
+      case _ => arg.toFloat
     }
     range(SortedSetEntry(parse(from, 1)), SortedSetEntry(parse(to, -1) + 1), reverse)
   }
@@ -413,7 +413,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     val (fromKey, toKey) = (parse(from), parse(to))
     if (fromKey > toKey) return Seq()
     val result = keys.subMap(fromKey, from.head == '[', toKey, to.head == '[').toSeq
-    limit[(String, Int)](if (reverse) result.reverse else result).map(_._1)
+    limit[(String, Float)](if (reverse) result.reverse else result).map(_._1)
   }
 
   /**
@@ -432,10 +432,10 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     case "_ZSTORE"          => keys.clear; scores.clear; run("ZADD")
     case "_ZGET"            => keys
     case "_SORT"            => sort(keys.keys)
-    case "ZADD"             => argsPaired.map(arg => add(arg._1.toInt, arg._2)).filter(x => x).size
+    case "ZADD"             => argsPaired.map(arg => add(arg._1.toFloat, arg._2)).filter(x => x).size
     case "ZCARD"            => keys.size
     case "ZCOUNT"           => rangeByScore(args(0), args(1)).size
-    case "ZINCRBY"          => increment(args(0), args(1).toInt)
+    case "ZINCRBY"          => increment(args(0), args(1).toFloat)
     case "ZLEXCOUNT"        => rangeByKey(args(0), args(1)).size
     case "ZRANGE"           => rangeByIndex(args(0), args(1))
     case "ZRANGEBYLEX"      => rangeByKey(args(0), args(1))
@@ -450,7 +450,8 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Int], IndexedTreeSet[So
     case "ZREVRANGEBYSCORE" => rangeByScore(args(1), args(0), reverse = true)
     case "ZREVRANK"         => rank(args(0), reverse = true)
     case "ZSCAN"            => scan(keys.keys)
-    case "ZSCORE"           => keys.get(args(0))
+    case "ZSCORE"           => numberToString(keys.get(args(0)))
   }
 
 }
+

@@ -592,7 +592,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
   def writeResponse(response: Any): String = response match {
     case x: Iterable[Any]        => s"*${x.size}${end}${x.map(writeResponse).mkString}"
     case x: Boolean              => writeResponse(if (x) 1 else 0)
-    case x: Number               => s":$x$end"
+    case x: Int                  => s":$x$end"
     case ErrorReply(msg, prefix) => s"-$prefix $msg$end"
     case SimpleReply(msg)        => s"+$msg$end"
     case null                    => s"$$-1$end"
