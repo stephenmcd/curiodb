@@ -225,7 +225,7 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
     case "_RENAME"    => rename(value, "_LSTORE")
     case "_LSTORE"    => value.clear; run("RPUSH")
     case "_SORT"      => sort(value)
-    case "LPUSH"      => value ++= args.reverse; run("LLEN")
+    case "LPUSH"      => args.reverse ++=: value; run("LLEN")
     case "RPUSH"      => value ++= args; run("LLEN")
     case "LPUSHX"     => run("LPUSH")
     case "RPUSHX"     => run("RPUSH")
