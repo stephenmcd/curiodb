@@ -5,6 +5,7 @@ import sbtassembly.AssemblyKeys._
 
 object CurioDB extends Build {
 
+  val scalaV = "2.11.7"
   val akkaV = "2.4-SNAPSHOT"
 
   val reverseConcat: MergeStrategy = new MergeStrategy {
@@ -19,6 +20,9 @@ object CurioDB extends Build {
   lazy val root = Project("root", file("."))
     .dependsOn(indexedTreeMap, hyperLogLog)
     .settings(
+      scalaVersion := scalaV,
+      scalaVersion in indexedTreeMap := scalaV,
+      scalaVersion in hyperLogLog := scalaV,
       name := "curiodb",
       version := "0.0.1",
       fork := true,
