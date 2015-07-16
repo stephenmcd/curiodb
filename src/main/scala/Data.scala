@@ -229,7 +229,7 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
     case "RPUSH"      => value ++= args; run("LLEN")
     case "LPUSHX"     => run("LPUSH")
     case "RPUSHX"     => run("RPUSH")
-    case "LPOP"       => val x = value(0); value -= x; x
+    case "LPOP"       => value remove 0
     case "RPOP"       => val x = value.last; value.reduceToSize(value.size - 1); x
     case "LSET"       => value(args(0).toInt) = args(1); SimpleReply()
     case "LINDEX"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
