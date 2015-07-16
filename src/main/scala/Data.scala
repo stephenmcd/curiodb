@@ -168,9 +168,9 @@ class HashNode extends Node[mutable.Map[String, String]] {
  * via the scheduler, which simply removes the blocked Command from the
  * set, and sends a null Response back to the ClientNode.
  */
-class ListNode extends Node[mutable.ArrayBuffer[String]] {
+class ListNode extends Node[mutable.ListBuffer[String]] {
 
-  var value = mutable.ArrayBuffer[String]()
+  var value = mutable.ListBuffer[String]()
 
   /**
    * Set of blocked Command instances awaiting a response.
@@ -200,7 +200,7 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
    * through the blocked Command instances and replay their commands.
    */
   def unblock(result: Any): Any = {
-    while (value.size > 0 && blocked.size > 0) {
+    while (value.nonEmpty && blocked.nonEmpty) {
       // Set the node's current Command to the blocked Command, so
       // that the run method has access to the correct Command.
       command = blocked.head
@@ -214,7 +214,7 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
    * LINSERT command that handles BEFORE/AFTER args.
    */
   def insert: Int = {
-    val i = value.indexOf(args(1)) + (if (args(0) == "AFTER") 1 else 0)
+    val i = value.indexOf(args(1)) + (if (args.head == "AFTER") 1 else 0)
     if (i >= 0) {
       value.insert(i, args(2))
       value.size
@@ -230,12 +230,12 @@ class ListNode extends Node[mutable.ArrayBuffer[String]] {
     case "LPUSHX"     => run("LPUSH")
     case "RPUSHX"     => run("RPUSH")
     case "LPOP"       => value remove 0
-    case "RPOP"       => val x = value.last; value.reduceToSize(value.size - 1); x
-    case "LSET"       => value(args(0).toInt) = args(1); SimpleReply()
-    case "LINDEX"     => val x = args(0).toInt; if (x >= 0 && x < value.size) value(x) else null
-    case "LREM"       => value.remove(args(0).toInt)
+    case "RPOP"       => val x = value.last; value.dropRight(1); x
+    case "LSET"       => value(args.head.toInt) = args(1); SimpleReply()
+    case "LINDEX"     => val x = args.head.toInt; if (x >= 0 && x < value.size) value(x) else null
+    case "LREM"       => value.remove(args.head.toInt)
     case "LRANGE"     => slice(value)
-    case "LTRIM"      => value = slice(value).asInstanceOf[mutable.ArrayBuffer[String]]; SimpleReply()
+    case "LTRIM"      => value = slice(value).asInstanceOf[mutable.ListBuffer[String]]; SimpleReply()
     case "LLEN"       => value.size
     case "BLPOP"      => block
     case "BRPOP"      => block
