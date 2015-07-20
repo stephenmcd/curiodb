@@ -27,6 +27,7 @@ object CurioDB extends Build {
       version := "0.0.1",
       fork := true,
       mainClass in (Compile, run) := Some("curiodb.CurioDB"),
+      //resolvers += "Local Maven Repository" at "file://" + Path.userHome.absolutePath + "/.ivy2/local",
       resolvers += "Akka Snapshots" at "http://repo.akka.io/snapshots/",
       libraryDependencies ++= Seq(
         "com.typesafe.akka" %% "akka-actor" % akkaV,
