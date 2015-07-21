@@ -53,7 +53,7 @@ def benchmark(extra_text=""):
             print name.ljust(12), ("%.2f" % requests).rjust(10)
 
 
-print "\nWelcome to benchmarks! This may take a couple of minutes..."
+print "\nWelcome to benchmarks! This may take a few minutes..."
 
 data = OrderedDict()
 
@@ -67,8 +67,10 @@ with server("CurioDB"):
 with open("README.md") as f:
     lines = f.readlines()
 
-before = lines[:lines.index("---------------|----------|----------|----\n") + 1]
-after = lines[lines.index("## License\n") - 1:]
+start = "---------------|----------|----------|----\n"
+end = "*Generated with the bundled [benchmark.py][benchmark-script] script.*\n"
+before = lines[:lines.index(start) + 1]
+after = lines[lines.index(end) - 1:]
 table = [("`%s`" % name).ljust(14)
          + " | " + ("%.2f" % result["Redis"]).rjust(8)
          + " | " + ("%.2f" % result["CurioDB"]).rjust(8)
