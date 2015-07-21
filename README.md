@@ -171,21 +171,22 @@ MacBook Air running OSX 10.9 (the numbers are requests per second):
 
 Benchmark      | Redis    | CurioDB  | %
 ---------------|----------|----------|----
-`PING_INLINE`  | 68965.52 | 51546.39 | 74%
-`PING_BULK`    | 70921.98 | 48543.69 | 68%
-`SET`          | 67704.80 | 44843.05 | 66%
-`GET`          | 70621.47 | 44662.79 | 63%
-`INCR`         | 71581.96 | 41288.19 | 58%
-`LPUSH`        | 70472.16 | 40436.71 | 57%
-`LPOP`         | 69589.42 | 9694.62  | 14%
-`SADD`         | 69686.41 | 41305.25 | 59%
-`SPOP`         | 70771.41 | 41271.15 | 58%
-`LPUSH`        | 70372.98 | 40225.26 | 57%
-`LRANGE_100`   | 24319.07 | 11795.24 | 49%
-`LRANGE_300`   | 9894.13  | 6295.25  | 64%
-`LRANGE_500`   | 7449.90  | 4763.27  | 64%
-`LRANGE_600`   | 5765.68  | 3976.46  | 69%
-`MSET`         | 46728.97 | 14607.07 | 31%
+`PING_INLINE`  | 57870.37 | 46296.29 | 79%
+`PING_BULK`    | 55432.37 | 44326.24 | 79%
+`SET`          | 50916.50 | 33233.63 | 65%
+`GET`          | 53078.56 | 38580.25 | 72%
+`INCR`         | 57405.28 | 33875.34 | 59%
+`LPUSH`        | 45977.01 | 28082.00 | 61%
+`LPOP`         | 56369.79 | 23894.86 | 42%
+`SADD`         | 59101.65 | 25733.40 | 43%
+`SPOP`         | 50403.23 | 33886.82 | 67%
+`LRANGE_100`   | 22246.94 | 11228.38 | 50%
+`LRANGE_300`   |  9984.03 |  6144.77 | 61%
+`LRANGE_500`   |  6473.33 |  4442.67 | 68%
+`LRANGE_600`   |  5323.40 |  3511.11 | 65%
+`MSET`         | 34554.25 | 15547.26 | 44%
+
+*Generated with the bundled [benchmark.py][benchmark-script] script.*
 
 ## License
 
@@ -216,3 +217,4 @@ BSD.
 [akka-config]: http://doc.akka.io/docs/akka/snapshot/general/configuration.html#listing-of-the-reference-configuration
 [typesafe-config]: https://github.com/typesafehub/config#standard-behavior
 [lua-scripting]: http://redis.io/commands/eval
+[benchmark-script]: https://github.com/stephenmcd/curiodb/blob/master/benchmark.py
