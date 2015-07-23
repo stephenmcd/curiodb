@@ -221,6 +221,27 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     } else -1
   }
 
+  /**
+   * LREM command - generates a new list, filtering out the given
+   * item for the given count, in either direction in linear time.
+   */
+  def remove: Int = {
+    val item = args(0)
+    val count = args(1).toInt
+    var result = 0
+    val iter = if (count >= 0) value.clone.iterator else value.clone.reverseIterator
+    value.clear
+    iter.foreach {x =>
+      if (x != item || (count != 0 && result == count.abs)) {
+        if (count >= 0)
+          value.append(x)
+        else
+          value.prepend(x)
+      } else result += 1
+    }
+    result
+  }
+
   def run: CommandRunner = ({
     case "_RENAME"    => rename(value, "_LSTORE")
     case "_LSTORE"    => value.clear; run("RPUSH")
@@ -229,11 +250,11 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     case "RPUSH"      => value ++= args; run("LLEN")
     case "LPUSHX"     => run("LPUSH")
     case "RPUSHX"     => run("RPUSH")
-    case "LPOP"       => value.remove(0)
-    case "RPOP"       => val x = value.last; value.dropRight(1); x
+    case "LPOP"       => if (value.isEmpty) null else value.remove(0)
+    case "RPOP"       => if (value.isEmpty) null else value.remove(value.size - 1)
     case "LSET"       => value(args.head.toInt) = args(1); SimpleReply()
     case "LINDEX"     => val x = args.head.toInt; if (x >= 0 && x < value.size) value(x) else null
-    case "LREM"       => value.remove(args.head.toInt)
+    case "LREM"       => remove
     case "LRANGE"     => slice(value)
     case "LTRIM"      => value = slice(value).asInstanceOf[mutable.ListBuffer[String]]; SimpleReply()
     case "LLEN"       => value.size
