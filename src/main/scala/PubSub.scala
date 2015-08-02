@@ -36,12 +36,12 @@ trait PubSubServer extends CommandProcessing {
   /**
    * Client subscriptions to channels.
    */
-  val channels = mutable.Map[String, mutable.Set[ActorRef]]()
+  lazy val channels = mutable.Map[String, mutable.Set[ActorRef]]()
 
   /**
    * Client subscriptions to patterns.
    */
-  val patterns = mutable.Map[String, mutable.Set[ActorRef]]()
+  lazy val patterns = mutable.Map[String, mutable.Set[ActorRef]]()
 
   /**
    * Handles subscribe and unsubscribe to both channels and patterns.
@@ -104,12 +104,12 @@ trait PubSubClient extends CommandProcessing {
   /**
    * Channels subscribed to.
    */
-  var channels = mutable.Set[String]()
+  lazy val channels = mutable.Set[String]()
 
   /**
    * Patterns subscribed to.
    */
-  var patterns = mutable.Set[String]()
+  lazy val patterns = mutable.Set[String]()
 
   /**
    * Handles all commands that subscribe or unsubsubscribe,
@@ -121,7 +121,6 @@ trait PubSubClient extends CommandProcessing {
     val xs = if (args.isEmpty) subscribed.toSeq else args
     xs.foreach {x => route(Seq("_" + command.name, x), destination = command.destination, broadcast = pattern)}
   }
-
 
   /**
    * Here we override the stop method used by CommandProcessing, which
@@ -144,10 +143,10 @@ trait PubSubClient extends CommandProcessing {
     case "UNSUBSCRIBE"  => subscribeOrUnsubscribe
     case "PSUBSCRIBE"   => subscribeOrUnsubscribe
     case "PUNSUBSCRIBE" => subscribeOrUnsubscribe
-    case "PUBSUB"       => args(0) match {
-      case "channels" => aggregate(Props[AggregatePubSubChannels])
-      case "numsub"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
-      case "numpat"   => route(Seq("_NUMPAT", randomString()), destination = command.destination)
+    case "PUBSUB"       => args(0).toUpperCase match {
+      case "CHANNELS" => aggregate(Props[AggregatePubSubChannels])
+      case "NUMSUB"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
+      case "NUMPAT"   => route(Seq("_NUMPAT", randomString()), destination = command.destination)
     }
   }
 
