@@ -68,13 +68,14 @@ object Coerce {
 /**
  * To implement call/pcall as synchronous functions, we need to use
  * Akka's ask pattern. Since each of the Node types only support
- * sending messages forwards (using tell), CallNode is used a temporary
- * actor that coordinates a command being run with the ask pattern. It
- * subclasses ClientNode as it's conceptually similar (it needs to
- * construct Command payloads from a sequence of args, in its case,
- * those provided by the pcall/call functions within a Lua script,
- * rather a TCP client), and in more concrete terms, needs to be able
- * to perform the same commands a ClientNode can (SELECT/TIME/etc).
+ * sending messages forwards (using tell), CallNode is used as a
+ * temporary actor that coordinates a command being run with the ask
+ * pattern. It subclasses ClientNode as it's conceptually similar (it
+ * needs to construct Command payloads from a sequence of args, in its
+ * case, those provided by the pcall/call functions within a Lua
+ * script, rather that a TCP client), and in more concrete terms, needs
+ * to be able to perform the same commands a ClientNode can, such as
+ * SELECT/TIME/etc.
  *
  * The ask flow is initiated when the CallNode receives the CallArgs
  * payload, constructed from the pcall/call function args in
@@ -101,7 +102,8 @@ case class CallArgs(args: Seq[String])
  * CallNode actor and sends them to it using the ask pattern.
  * The raiseErrors arg marks the different behavior when a runtime Lua
  * error occurs via pcall/call - specifically whether a LuaError is
- * raised, or a message table containing the error is returned.
+ * raised (as with call), or a message table containing the error is
+ * returned (as with pcall).
  */
 class CallFunction(context: ActorContext, raiseErrors: Boolean = false) extends VarArgFunction {
 

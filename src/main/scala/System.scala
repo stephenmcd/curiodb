@@ -605,6 +605,12 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands wit
     case x                       => s"$$${x.toString.size}$end$x$end"
   }
 
+  /**
+   * Constructs a Command payload for the given input, validates it,
+   * and either routes it to a KeyNode or sends it back to itself in
+   * the case of client commands. Also used in CallNode to support
+   * running commands from Lua.
+   */
   def sendCommand(input: Seq[String]): Unit = {
     command = Command(input, db = db, destination = Some(self))
     client = Some(sender())
