@@ -242,6 +242,18 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     result
   }
 
+  /**
+   * LPOP/RPOP/BLPOP/BRPOP - handles returning nil on empty lists,
+   * and also returning the key/item pair for blocking pops.
+   */
+  def pop(index: Int): Any = {
+    val item = if (value.isEmpty) null else value.remove(index)
+    command.name match {
+      case "BLPOP" | "BRPOP" => Seq(command.key, item)
+      case _                 => item
+    }
+  }
+
   def run: CommandRunner = ({
     case "_RENAME"    => rename(value, "_LSTORE")
     case "_LSTORE"    => value.clear; run("RPUSH")
@@ -250,8 +262,8 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     case "RPUSH"      => value ++= args; run("LLEN")
     case "LPUSHX"     => run("LPUSH")
     case "RPUSHX"     => run("RPUSH")
-    case "LPOP"       => if (value.isEmpty) null else value.remove(0)
-    case "RPOP"       => if (value.isEmpty) null else value.remove(value.size - 1)
+    case "LPOP"       => pop(0)
+    case "RPOP"       => pop(value.size - 1)
     case "LSET"       => value(args.head.toInt) = args(1); SimpleReply()
     case "LINDEX"     => val x = args.head.toInt; if (x >= 0 && x < value.size) value(x) else null
     case "LREM"       => remove
@@ -261,7 +273,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     case "BLPOP"      => block
     case "BRPOP"      => block
     case "BRPOPLPUSH" => block
-    case "RPOPLPUSH"  => val x = run("RPOP"); route("LPUSH" +: args :+ x.toString); x
+    case "RPOPLPUSH"  => val x = run("RPOP"); if (x != null) {route("LPUSH" +: args :+ x.toString)}; x
     case "LINSERT"    => insert
   }: CommandRunner) andThen unblock
 
