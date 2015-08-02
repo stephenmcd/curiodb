@@ -259,7 +259,7 @@ class NodeEntry(
  * read its previous value from disk. The idea here is to allow more
  * data to be stored in the system than can fit in memory.
  */
-class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] with PubSubServer {
+class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] with PubSubServer with ScriptingServer {
 
   /**
    * Alias for keys mapped to each NodeEntry.
@@ -454,7 +454,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "RENAME"        => db(command.key).node.foreach(_ ! Command(Seq("_RENAME", command.key, args(0)), db = command.db)); SimpleReply()
     case "PERSIST"       => persist
     case "SORT"          => sort
-  }: CommandRunner) orElse runPubSub
+  }: CommandRunner) orElse runPubSub orElse runScripting
 
   /**
    * We override the KeyNode actor's Receive so as to perform validation,
@@ -469,7 +469,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
         if (Commands.overwrites(command.name) && overwrite) delete(command.key)
         node ! command
         if (command.name match {
-          case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" => false
+          // TODO: This list of commands should be represented somewhere
+          // else, possibly as a new attribute in commands.conf. It might
+          // be called "pseudokeyed" (replacing their use of "keyed"), as
+          // these are the commands that leverage key distribution but
+          // don't have a node that can actually sleep.
+          case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" | "_NUMSUB" | "_NUMPAT" |
+               "EVALSHA" | "_SCRIPTLOAD" | "_SCRIPTFLUSH" => false
           case _ => sleepEnabled && Commands.keyed(command.name)
         }) sleep
     }
@@ -499,7 +505,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
  * client. ClientNode takes on the role of a Node, as there are a
  * variety of commands that logically belong to it.
 */
-class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
+class ClientNode extends Node[Null] with PubSubClient with AggregateCommands with ScriptingClient {
 
   var value = null
 
@@ -534,7 +540,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
     case "TIME"         => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
     case "SHUTDOWN"     => context.system.terminate(); SimpleReply()
     case "QUIT"         => respond(SimpleReply()); self ! Delete
-  }: CommandRunner) orElse runPubSub orElse runAggregate
+  }: CommandRunner) orElse runPubSub orElse runAggregate orElse runScripting
 
   /**
    * Performs initial Command validation before sending anywhere,
@@ -599,6 +605,19 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
     case x                       => s"$$${x.toString.size}$end$x$end"
   }
 
+  def sendCommand(input: Seq[String]): Unit = {
+    command = Command(input, db = db, destination = Some(self))
+    client = Some(sender())
+    validate match {
+      case Some(error) => respond(error)
+      case None =>
+        if (command.nodeType == "client")
+          self ! command
+        else
+          route(clientCommand = Option(command))
+    }
+  }
+
   /**
    * Handles both incoming messages from the client socket actor in
    * which case a reference to the client actor socket is stored,
@@ -610,18 +629,7 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands {
     case Tcp.Received(data) =>
       var parsed: Option[Seq[String]] = None
       buffer.append(data.utf8String)
-      while ({parsed = parseBuffer; parsed.isDefined}) {
-        command = Command(parsed.get, db = db, destination = Some(self))
-        client = Some(sender())
-        validate match {
-          case Some(error) => respond(error)
-          case None =>
-            if (command.nodeType == "client")
-              self ! command
-            else
-              route(clientCommand = Option(command))
-        }
-      }
+      while ({parsed = parseBuffer; parsed.isDefined}) sendCommand(parsed.get)
 
     case Tcp.PeerClosed => stop
 

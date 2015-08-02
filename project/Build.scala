@@ -32,7 +32,8 @@ object CurioDB extends Build {
       libraryDependencies ++= Seq(
         "com.typesafe.akka" %% "akka-actor" % akkaV,
         "com.typesafe.akka" %% "akka-persistence-experimental" % akkaV,
-        "com.typesafe.akka" %% "akka-cluster" % akkaV
+        "com.typesafe.akka" %% "akka-cluster" % akkaV,
+        "org.luaj" % "luaj-jse" % "3.0.1"
       ),
       assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript =
         Option(Seq("#!/usr/bin/env sh", """ exec java -jar "$0" "$@" """))),

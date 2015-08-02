@@ -106,6 +106,9 @@ flow of a client sending a command:
   ([Data.scala][data-source]).
 * The KV Node then sends a response back to the originating Client
   Node, which returns it to the outside client.
+
+Not diagrammed, but in addition to the above:
+
 * Some commands require coordination with multiple KV Nodes, in which
   case a temporary Aggregate actor
   ([Aggregation.scala][aggregation-source]) is created by the Client
@@ -114,6 +117,11 @@ flow of a client sending a command:
 * PubSub is implemented by adding behavior to Key Nodes and Client
   Nodes, which act as PubSub servers and clients respectively
   ([PubSub.scala][pubsub-source]).
+* Lua scripting is fully supported
+  ([Scripting.scala][scripting-source]) thanks to [LuaJ][luaj], and is
+  implemented similarly to PubSub, where behavior is added to Key Nodes
+  which store and run compiled Lua scripts (via `EVALSHA`), and Client
+  Nodes which can run uncompiled scripts directly (via `EVAL`).
 
 ## Configuration
 
@@ -154,7 +162,8 @@ curiodb {
   stored on every node in the cluster, and the `PSUBSCRIBE` and
   `PUNSUBSCRIBE` commands get broadcast to all of them. This needs
   rethinking!
-* No [Lua scripting][lua-scripting]. :-(
+* No transaction support.
+* Lua scripts are not atomic.
 
 Mainly though, Redis is an extremely mature and battle-tested project
 that's been developed by many over the years, while CurioDB is a
@@ -214,7 +223,8 @@ BSD.
 [data-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/Data.scala
 [aggregation-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/Aggregation.scala
 [pubsub-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/PubSub.scala
+[scripting-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/Scripting.scala
+[luaj]: http://www.luaj.org/luaj/3.0/README.html
 [akka-config]: http://doc.akka.io/docs/akka/snapshot/general/configuration.html#listing-of-the-reference-configuration
 [typesafe-config]: https://github.com/typesafehub/config#standard-behavior
-[lua-scripting]: http://redis.io/commands/eval
 [benchmark-script]: https://github.com/stephenmcd/curiodb/blob/master/benchmark.py

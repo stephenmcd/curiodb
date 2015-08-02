@@ -479,6 +479,29 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
 }
 
 /**
+ * Aggregate for the SCRIPT EXISTS command.
+ */
+class AggregateScriptExists extends AggregateBroadcast[Iterable[String]]("_SCRIPTEXISTS") {
+
+  /**
+   * The first arg is the "EXISTS" sub-command, so exclude it from args.
+   */
+  override def args: Seq[String] = command.args.tail
+
+  /**
+   * Each KeyNode returns a list of SHA1 script values that exist, so
+   * on completion, we build a Set of these and return a sequence of
+   * bools of the original arg list of SHA1 values mapped to whether
+   * they exist or not.
+   */
+  override def complete: Seq[Boolean] = {
+    val exists = responses.values.toSeq.flatten.toSet
+    args.map(exists.contains)
+  }
+
+}
+
+/**
  * Base Aggregate for commands that don't need data for a reply, namely
  * FLUSHDB/FLUSHALL.
  */
