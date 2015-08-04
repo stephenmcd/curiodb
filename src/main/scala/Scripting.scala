@@ -5,12 +5,13 @@
 package curiodb
 
 import akka.actor.{Actor, ActorContext, ActorLogging, Props}
+import akka.event.LoggingAdapter
 import akka.pattern.ask
 import akka.util.Timeout
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import org.luaj.vm2.{LuaValue, Varargs => LuaArgs, LuaTable, LuaNumber, LuaClosure, Prototype => LuaScript, LuaError}
-import org.luaj.vm2.lib.{VarArgFunction, OneArgFunction}
+import org.luaj.vm2.lib.{TwoArgFunction, VarArgFunction, OneArgFunction}
 import org.luaj.vm2.lib.jse.{JsePlatform, CoerceLuaToJava, CoerceJavaToLua}
 import org.luaj.vm2.compiler.LuaC
 import scala.collection.mutable
@@ -129,11 +130,38 @@ class ReplyFunction(key: String) extends OneArgFunction {
 }
 
 /**
- * Provides backward compatibility with table.getn from Lua 5.0.
+ * Lua API for the status_reply/error_reply functions.
  */
 class TableGetnFuncton extends OneArgFunction {
   override def call(table: LuaValue): LuaValue = table.len
 }
+
+/**
+ * Lua API for the log function.
+ */
+class LogFuncton(log: LoggingAdapter) extends TwoArgFunction {
+  override def call(level: LuaValue, content: LuaValue): LuaValue = {
+    val c = Coerce.fromLua(content).toString
+    Coerce.fromLua(level) match {
+      case LOG_DEBUG =>   log.debug(c)
+      case LOG_VERBOSE => log.info(c)
+      case LOG_NOTICE =>  log.warning(c)
+      case LOG_WARNING => log.error(c)
+    }
+    LuaValue.NONE
+  }
+}
+
+/**
+ * Log levels
+ */
+case object LOG_DEBUG
+
+case object LOG_VERBOSE
+
+case object LOG_NOTICE
+
+case object LOG_WARNING
 
 /**
  * Scripts stored via the SCRIPT LOAD command are stored in KeyNode
@@ -150,37 +178,42 @@ class TableGetnFuncton extends OneArgFunction {
  */
 class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogging {
 
+  val globals = JsePlatform.standardGlobals()
+
+  val api = LuaValue.tableOf()
+
+  override def preStart() = {
+    // Build the initial Lua environment, and provide some
+    // compatibility tweaks - LuaJ seems to omit a global unpack
+    // function, and we also support Lua 5.0 features like math.mod
+    // and table.getn, which are removed from newer Lua versions.
+    // http://lua-users.org/wiki/CompatibilityWithLuaFive
+    globals.set("unpack", globals.get("table").get("unpack"))
+    globals.get("math").set("mod", globals.get("math").get("fmod"))
+    globals.get("table").set("getn", new TableGetnFuncton())
+
+    // Add the KEYS/ARGV Lua variables.
+    val offset = if (command.name == "EVAL") 2 else 1
+    val keyCount = if (offset <= args.size) args(offset - 1).toInt else 0
+    val keys = args.slice(offset, offset + keyCount)
+    val argv = args.slice(offset + keyCount, args.size)
+    globals.set("KEYS", Coerce.toLua(keys))
+    globals.set("ARGV", Coerce.toLua(argv))
+
+    // Add the API. We add it to both the "redis" and "curiodb" names.
+    api.set("pcall", new CallFunction(context))
+    api.set("call", new CallFunction(context, raiseErrors = true))
+    api.set("status_reply", new ReplyFunction("ok"))
+    api.set("error_reply", new ReplyFunction("err"))
+    globals.set("curiodb", api)
+    globals.set("redis", api)
+
+    initLogging()
+  }
+
   def receive: Receive = {
     case c: Command =>
       command = c
-
-      // Build the initial Lua environment, and provide some
-      // compatibility tweaks - LuaJ seems to omit a global unpack
-      // function, and we also support Lua 5.0 features like math.mod
-      // and table.getn, which are removed from newer Lua versions.
-      // http://lua-users.org/wiki/CompatibilityWithLuaFive
-      val globals = JsePlatform.standardGlobals()
-      globals.set("unpack", globals.get("table").get("unpack"))
-      globals.get("math").set("mod", globals.get("math").get("fmod"))
-      globals.get("table").set("getn", new TableGetnFuncton())
-
-      // Add the KEYS/ARGV Lua variables.
-      val offset = if (command.name == "EVAL") 2 else 1
-      val keyCount = if (offset <= args.size) args(offset - 1).toInt else 0
-      val keys = args.slice(offset, offset + keyCount)
-      val argv = args.slice(offset + keyCount, args.size)
-      globals.set("KEYS", Coerce.toLua(keys))
-      globals.set("ARGV", Coerce.toLua(argv))
-
-      // Add the API. We add it to both the "redis" and "curiodb" names.
-      val api = LuaValue.tableOf()
-      api.set("pcall", new CallFunction(context))
-      api.set("call", new CallFunction(context, raiseErrors = true))
-      api.set("status_reply", new ReplyFunction("ok"))
-      api.set("error_reply", new ReplyFunction("err"))
-      globals.set("curiodb", api)
-      globals.set("redis", api)
-
       // Run the script and return its result back to the ClientNode.
       respond(Try((new LuaClosure(compiled, globals)).call()) match {
         case Success(result) => Coerce.fromLua(result)
@@ -188,6 +221,17 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       })
       stop
 
+  }
+
+  /**
+   * init Lua API for the log function.
+   */
+  def initLogging(): Unit = {
+    api.set("LOG_DEBUG",   Coerce.toLua(LOG_DEBUG))
+    api.set("LOG_VERBOSE", Coerce.toLua(LOG_VERBOSE))
+    api.set("LOG_NOTICE",  Coerce.toLua(LOG_NOTICE))
+    api.set("LOG_WARNING", Coerce.toLua(LOG_WARNING))
+    api.set("log", new LogFuncton(log))
   }
 
 }
