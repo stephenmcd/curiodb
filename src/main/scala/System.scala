@@ -7,9 +7,7 @@ package curiodb
 import akka.actor.{ActorLogging, ActorRef, Cancellable, Props}
 import akka.dispatch.ControlMessage
 import akka.event.LoggingReceive
-import akka.io.Tcp
 import akka.persistence._
-import akka.util.ByteString
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -497,23 +495,22 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 /**
  * A ClientNode is a special type of Node in the system. It does not
  * represent any key/value provided by a client, but instead is
- * responsible for managing the lifecycle of a single client
- * connection. Its main role in doing this is to receive messages,
- * parse the Redis protocol into a Command instance, which is sent onto
- * a KeyNode or Aggrgate actor, and await a reply which it then
- * converts back into the Redis protocol before sending it to the
- * client. ClientNode takes on the role of a Node, as there are a
- * variety of commands that logically belong to it.
-*/
-class ClientNode extends Node[Null] with PubSubClient with AggregateCommands with ScriptingClient {
+ * responsible for managing the life-cycle of a single client
+ * connection.
+ *
+ * ClientNode is subclassed according to each external protocol
+ * supported, such as the Redis protocol over TCP, JSON over HTTP, and
+ * also the Lua pcall/call scripting API. Each subclass is responsible
+ * for converting its input into a Command payload, and converting
+ * Response payloads back to the relevant protocol deal with.
+ *
+ * ClientNode is a Node subclass, as it also handles certain commands
+ * itself, such as utiilities that don't need to be routed via KeyNode
+ * actors.
+ */
+abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCommands with ScriptingClient {
 
   var value = null
-
-  /**
-   * Stores incoming data from the client socket, until a complete
-   * Redis protocol packet arrives.
-   */
-  val buffer = new StringBuilder()
 
   /**
    * ActorRef for the client socket - we store it once a complete
@@ -528,11 +525,6 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands wit
    */
   var db = command.db
 
-  /**
-   * End of line marker used in parsing/writing Redis protocol.
-   */
-  val end = "\r\n"
-
   def run: CommandRunner = ({
     case "SELECT"       => db = args(0); SimpleReply()
     case "ECHO"         => args(0)
@@ -543,10 +535,10 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands wit
   }: CommandRunner) orElse runPubSub orElse runAggregate orElse runScripting
 
   /**
-   * Performs initial Command validation before sending anywhere,
+   * Performs initial Command validation before sending it anywhere,
    * as per the command's definition in commands.conf, namely that the
    * command belongs to a type of Node, it contains a key if required,
-   * and the range of arguments provided match the command.
+   * and the number of arguments fall within the configured range.
    */
   def validate: Option[ErrorReply] = {
     if (command.nodeType == "")
@@ -559,57 +551,9 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands wit
   }
 
   /**
-   * Parses the input buffer for a complete Redis protocol packet.
-   * If a complete packet is parsed, the buffer is cleared and its
-   * contents are returned.
-   */
-  def parseBuffer: Option[Seq[String]] = {
-
-    var pos = 0
-
-    def next(length: Int = 0): String = {
-      val to = if (length <= 0) buffer.indexOf(end, pos) else pos + length
-      val part = buffer.slice(pos, to)
-      if (part.size != to - pos) throw new Exception()
-      pos = to + end.size
-      part.stripLineEnd
-    }
-
-    def parts: Seq[String] = {
-      val part = next()
-      part.head match {
-        case '-'|'+'|':' => Seq(part.tail)
-        case '$'         => Seq(next(part.tail.toInt))
-        case '*'         => (1 to part.tail.toInt).map(_ => parts.head)
-        case _           => part.split(' ')
-      }
-    }
-
-    Try(parts) match {
-      case Success(output) => buffer.delete(0, pos); Some(output)
-      case Failure(_)      => None
-    }
-
-  }
-
-  /**
-   * Converts a response for a command into a Redis protocol string.
-   */
-  def writeResponse(response: Any): String = response match {
-    case x: Iterable[Any]        => s"*${x.size}${end}${x.map(writeResponse).mkString}"
-    case x: Boolean              => writeResponse(if (x) 1 else 0)
-    case x: Int                  => s":$x$end"
-    case ErrorReply(msg, prefix) => s"-$prefix $msg$end"
-    case SimpleReply(msg)        => s"+$msg$end"
-    case null                    => s"$$-1$end"
-    case x                       => s"$$${x.toString.size}$end$x$end"
-  }
-
-  /**
    * Constructs a Command payload for the given input, validates it,
    * and either routes it to a KeyNode or sends it back to itself in
-   * the case of client commands. Also used in CallNode to support
-   * running commands from Lua.
+   * the case of client commands.
    */
   def sendCommand(input: Seq[String]): Unit = {
     command = Command(input, db = db, destination = Some(self))
@@ -624,23 +568,6 @@ class ClientNode extends Node[Null] with PubSubClient with AggregateCommands wit
     }
   }
 
-  /**
-   * Handles both incoming messages from the client socket actor in
-   * which case a reference to the client actor socket is stored,
-   * and responses from nodes which are then sent back to the client
-   * socket actor.
-   */
-  override def receiveCommand: Receive = ({
-
-    case Tcp.Received(data) =>
-      var parsed: Option[Seq[String]] = None
-      buffer.append(data.utf8String)
-      while ({parsed = parseBuffer; parsed.isDefined}) sendCommand(parsed.get)
-
-    case Tcp.PeerClosed => stop
-
-    case Response(_, response) => client.get ! Tcp.Write(ByteString(writeResponse(response)))
-
-  }: Receive) orElse receivePubSub orElse super.receiveCommand
+  override def receiveCommand: Receive = receivePubSub orElse super.receiveCommand
 
 }

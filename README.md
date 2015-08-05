@@ -8,7 +8,7 @@ replacement for Redis is purely incidental. :-)
 ## Installation
 
 I've been using [SBT][sbt] to build the project, which you can install
-on [OSX][sbt-osx], [Linux][sbt-linux] or [Windows][sbt-windows]. With
+on [OS X][sbt-osx], [Linux][sbt-linux] or [Windows][sbt-windows]. With
 that done, you just need to clone this repository and run it:
 
 ```
@@ -95,7 +95,9 @@ flow of a client sending a command:
 * Upon receiving a new outside client connection, the server actor will
   create a Client Node actor ([System.scala][system-source]), it's
   responsible for the life-cycle of a single client connection, as well
-  as parsing the incoming and writing the outgoing Redis wire protocol.
+  as parsing the incoming and writing the outgoing protocol, such as the
+  Redis protocol for TCP clients, or JSON for HTTP clients
+  ([Server.scala][server-source]).
 * Key Node actors ([System.scala][system-source]) manage the key space
   for the entire system, which are distributed across the entire
   cluster using consistent hashing. A Client Node will forward the
@@ -133,11 +135,16 @@ consult those projects for more info.
 ```
 curiodb {
 
-  listen = "tcp://127.0.0.1:6379"  // Address listening for clients
-  persist-after = 1000             // Like "save" in Redis
-  sleep-after = 1000               // Virtual memory millisecond threshold
-  node = node1                     // Current cluster node (from the
-                                   // nodes keys below)
+  // Addresses listening for clients.
+  listen = [
+    "tcp://127.0.0.1:6379",  // TCP server using Redis protocol.
+    "http://127.0.0.1:2600", // HTTP server using JSON.
+  ]
+
+  persist-after = 1000       // Like "save" in Redis
+  sleep-after = 1000         // Virtual memory millisecond threshold
+  node = node1               // Current cluster node (from the
+                             // nodes keys below)
   // Cluster nodes.
   nodes = {
     node1: "tcp://127.0.0.1:9001"
@@ -147,6 +154,25 @@ curiodb {
 
 }
 ```
+
+## HTTP/JSON API
+
+As alluded to in the configuration example above, CurioDB also supports
+a HTTP/JSON API, as well as the same wire protocol that Redis
+implements over TCP. Commands are issued with POST requests containing
+a JSON map with a single `args` key, containing an Array of arguments.
+Responses are returned as a JSON map with a single `result` key:
+
+```
+$ curl -X POST -d '{"args": ["set", "foo", "bar"]}' http://127.0.0.1:2600
+{"result":"OK"}
+
+$ curl -X POST -d '{"args": ["mget", "foo", "baz"]}' http://127.0.0.1:2600
+{"result":["bar",null]}
+```
+
+In the case of errors such as invalid arguments, a response with a 400
+status is returned, with an error message in the response body.
 
 ## Disadvantages over Redis
 
@@ -176,7 +202,7 @@ it too.
 ## Performance
 
 These are the results of `redis-benchmark -q` on an early 2014
-MacBook Air running OSX 10.9 (the numbers are requests per second):
+MacBook Air running OS X 10.9 (the numbers are requests per second):
 
 Benchmark      | Redis    | CurioDB  | %
 ---------------|----------|----------|----

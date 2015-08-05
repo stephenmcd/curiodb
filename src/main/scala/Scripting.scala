@@ -68,20 +68,18 @@ object Coerce {
 /**
  * To implement call/pcall as synchronous functions, we need to use
  * Akka's ask pattern. Since each of the Node types only support
- * sending messages forwards (using tell), CallNode is used as a
+ * sending messages forwards (using tell), LuaClientNode is used as a
  * temporary actor that coordinates a command being run with the ask
- * pattern. It subclasses ClientNode as it's conceptually similar (it
- * needs to construct Command payloads from a sequence of args, in its
- * case, those provided by the pcall/call functions within a Lua
- * script, rather that a TCP client), and in more concrete terms, needs
- * to be able to perform the same commands a ClientNode can, such as
- * SELECT/TIME/etc.
+ * pattern. It's also a ClientNode as it needs to construct Command
+ * payloads from a sequence of args, in its case, those provided by the
+ * pcall/call functions within a Lua script, and needs to be able to
+ * perform the same commands a ClientNode can, such as SELECT/TIME/etc.
  *
- * The ask flow is initiated when the CallNode receives the CallArgs
- * payload, constructed from the pcall/call function args in
+ * The ask flow is initiated when the LuaClientNode receives the
+ * CallArgs payload, constructed from the pcall/call function args in
  * CallFunction below.
  */
-class CallNode extends ClientNode {
+class LuaClientNode extends ClientNode {
 
   override def receiveCommand: Receive = ({
     case CallArgs(args)     => sendCommand(args)
@@ -92,14 +90,14 @@ class CallNode extends ClientNode {
 
 /**
  * Args given to pcall/call functions inside a Lua script, that will be
- * used to construct a Command payload from a CallNode actor.
+ * used to construct a Command payload from a LuaClientNode actor.
  */
 case class CallArgs(args: Seq[String])
 
 /**
  * Lua API for pcall/call. When called, it takes the args provided,
  * constructs a CallArgs payload from them, creates a temporary
- * CallNode actor and sends them to it using the ask pattern.
+ * LuaClientNode actor and sends them to it using the ask pattern.
  * The raiseErrors arg marks the different behavior when a runtime Lua
  * error occurs via pcall/call - specifically whether a LuaError is
  * raised (as with call), or a message table containing the error is
@@ -109,7 +107,7 @@ class CallFunction(context: ActorContext, raiseErrors: Boolean = false) extends 
 
   override def invoke(luaArgs: LuaArgs): LuaValue = {
     val args = (for (i <- 1 to luaArgs.narg) yield luaArgs.tojstring(i)).toSeq
-    val node = context.actorOf(Props[CallNode])
+    val node = context.actorOf(Props[LuaClientNode])
     val timeout_ = 2 seconds
     implicit val timeout: Timeout = timeout_
     Await.result(node ? CallArgs(args), timeout_).asInstanceOf[Response].value match {
@@ -131,22 +129,22 @@ class ReplyFunction(key: String) extends OneArgFunction {
 /**
  * Provides backward compatibility with table.getn from Lua 5.0.
  */
-class TableGetnFuncton extends OneArgFunction {
+class TableGetnFunction extends OneArgFunction {
   override def call(table: LuaValue): LuaValue = table.len
 }
 
 /**
  * Scripts stored via the SCRIPT LOAD command are stored in KeyNode
  * actors, and as such, scripts can be run from both KeyNode and
- * ClientNode actors (mixed in with the ScriptServer and ScriptClient
- * traits), via the EVALSHA and EVAL commands respectively. Given this,
- * a temporary actor is required to run the script, as it may make
- * synchronous Lua calls to pcall/call, which may result in a command
- * running against the same KeyNode that's running the script - this
- * would fail since the running Lua script would block the command from
- * being run. So - ScriptRunner is merely a temporary actor that runs
- * a Lua script, which is initiated by receiving the original Command
- * payload it can then use to respond to.
+ * ClientNode actors (mixed in with the ScriptingServer and
+ * ScriptingClient traits), via the EVALSHA and EVAL commands
+ * respectively. Given this, a temporary actor is required to run the
+ * script, as it may make synchronous Lua calls to pcall/call, which
+ * may result in a command running against the same KeyNode that's
+ * running the script - this would fail since the running Lua script
+ * would block the command from being run. So - ScriptRunner is merely
+ * a temporary actor that runs a Lua script, which is initiated by
+ * receiving the original Command payload it can then to respond to.
  */
 class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogging {
 
@@ -162,7 +160,7 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       val globals = JsePlatform.standardGlobals()
       globals.set("unpack", globals.get("table").get("unpack"))
       globals.get("math").set("mod", globals.get("math").get("fmod"))
-      globals.get("table").set("getn", new TableGetnFuncton())
+      globals.get("table").set("getn", new TableGetnFunction())
 
       // Add the KEYS/ARGV Lua variables.
       val offset = if (command.name == "EVAL") 2 else 1

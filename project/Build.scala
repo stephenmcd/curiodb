@@ -6,7 +6,8 @@ import sbtassembly.AssemblyKeys._
 object CurioDB extends Build {
 
   val scalaV = "2.11.7"
-  val akkaV = "2.4-SNAPSHOT"
+  val akkaV  = "2.4-SNAPSHOT"
+  val sprayV = "1.3.3"
 
   val reverseConcat: MergeStrategy = new MergeStrategy {
     val name = "reverseConcat"
@@ -29,10 +30,13 @@ object CurioDB extends Build {
       mainClass in (Compile, run) := Some("curiodb.CurioDB"),
       //resolvers += "Local Maven Repository" at "file://" + Path.userHome.absolutePath + "/.ivy2/local",
       resolvers += "Akka Snapshots" at "http://repo.akka.io/snapshots/",
+      resolvers += "spray repo" at "http://repo.spray.io",
       libraryDependencies ++= Seq(
         "com.typesafe.akka" %% "akka-actor" % akkaV,
         "com.typesafe.akka" %% "akka-persistence-experimental" % akkaV,
         "com.typesafe.akka" %% "akka-cluster" % akkaV,
+        "io.spray" %% "spray-can" % sprayV,
+        "io.spray" %% "spray-json" % "1.3.2",
         "org.luaj" % "luaj-jse" % "3.0.1"
       ),
       assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript =
