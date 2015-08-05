@@ -134,10 +134,10 @@ class LogFuncton(log: LoggingAdapter) extends TwoArgFunction {
   override def call(level: LuaValue, content: LuaValue): LuaValue = {
     val c = Coerce.fromLua(content).toString
     Coerce.fromLua(level) match {
-      case LOG_DEBUG =>   log.debug(c)
-      case LOG_VERBOSE => log.info(c)
-      case LOG_NOTICE =>  log.warning(c)
-      case LOG_WARNING => log.error(c)
+      case LogLevel.Debug   => log.debug(c)
+      case LogLevel.Verbose => log.info(c)
+      case LogLevel.Notice  => log.warning(c)
+      case LogLevel.Warning => log.error(c)
     }
     LuaValue.NONE
   }
@@ -146,13 +146,10 @@ class LogFuncton(log: LoggingAdapter) extends TwoArgFunction {
 /**
  * Log levels.
  */
-case object LOG_DEBUG
-
-case object LOG_VERBOSE
-
-case object LOG_NOTICE
-
-case object LOG_WARNING
+object LogLevel extends Enumeration {
+  type LogLevel = Value
+  val Debug, Verbose, Notice, Warning = Value
+}
 
 /**
  * Lua API for the status_reply/error_reply functions.
@@ -201,13 +198,13 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       // Add the API. We add it to both the "redis" and "curiodb" names.
       val api = LuaValue.tableOf()
       api.set("pcall", new CallFunction(context))
-      api.set("call", new CallFunction(context, raiseErrors = true))
+      api.set("call",  new CallFunction(context, raiseErrors = true))
       api.set("status_reply", new ReplyFunction("ok"))
-      api.set("error_reply", new ReplyFunction("err"))
-      api.set("LOG_DEBUG",   Coerce.toLua(LOG_DEBUG))
-      api.set("LOG_VERBOSE", Coerce.toLua(LOG_VERBOSE))
-      api.set("LOG_NOTICE",  Coerce.toLua(LOG_NOTICE))
-      api.set("LOG_WARNING", Coerce.toLua(LOG_WARNING))
+      api.set("error_reply",  new ReplyFunction("err"))
+      api.set("LOG_DEBUG",   Coerce.toLua(LogLevel.Debug))
+      api.set("LOG_VERBOSE", Coerce.toLua(LogLevel.Verbose))
+      api.set("LOG_NOTICE",  Coerce.toLua(LogLevel.Notice))
+      api.set("LOG_WARNING", Coerce.toLua(LogLevel.Warning))
       api.set("log", new LogFuncton(log))
       globals.set("curiodb", api)
       globals.set("redis", api)
