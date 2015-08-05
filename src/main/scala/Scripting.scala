@@ -5,12 +5,13 @@
 package curiodb
 
 import akka.actor.{Actor, ActorContext, ActorLogging, Props}
+import akka.event.LoggingAdapter
 import akka.pattern.ask
 import akka.util.Timeout
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import org.luaj.vm2.{LuaValue, Varargs => LuaArgs, LuaTable, LuaNumber, LuaClosure, Prototype => LuaScript, LuaError}
-import org.luaj.vm2.lib.{VarArgFunction, OneArgFunction}
+import org.luaj.vm2.lib.{OneArgFunction, TwoArgFunction, VarArgFunction}
 import org.luaj.vm2.lib.jse.{JsePlatform, CoerceLuaToJava, CoerceJavaToLua}
 import org.luaj.vm2.compiler.LuaC
 import scala.collection.mutable
@@ -127,7 +128,34 @@ class ReplyFunction(key: String) extends OneArgFunction {
 }
 
 /**
- * Provides backward compatibility with table.getn from Lua 5.0.
+ * Lua API for the log function.
+ */
+class LogFuncton(log: LoggingAdapter) extends TwoArgFunction {
+  override def call(level: LuaValue, content: LuaValue): LuaValue = {
+    val c = Coerce.fromLua(content).toString
+    Coerce.fromLua(level) match {
+      case LOG_DEBUG =>   log.debug(c)
+      case LOG_VERBOSE => log.info(c)
+      case LOG_NOTICE =>  log.warning(c)
+      case LOG_WARNING => log.error(c)
+    }
+    LuaValue.NONE
+  }
+}
+
+/**
+ * Log levels.
+ */
+case object LOG_DEBUG
+
+case object LOG_VERBOSE
+
+case object LOG_NOTICE
+
+case object LOG_WARNING
+
+/**
+ * Lua API for the status_reply/error_reply functions.
  */
 class TableGetnFunction extends OneArgFunction {
   override def call(table: LuaValue): LuaValue = table.len
@@ -176,6 +204,11 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       api.set("call", new CallFunction(context, raiseErrors = true))
       api.set("status_reply", new ReplyFunction("ok"))
       api.set("error_reply", new ReplyFunction("err"))
+      api.set("LOG_DEBUG",   Coerce.toLua(LOG_DEBUG))
+      api.set("LOG_VERBOSE", Coerce.toLua(LOG_VERBOSE))
+      api.set("LOG_NOTICE",  Coerce.toLua(LOG_NOTICE))
+      api.set("LOG_WARNING", Coerce.toLua(LOG_WARNING))
+      api.set("log", new LogFuncton(log))
       globals.set("curiodb", api)
       globals.set("redis", api)
 
