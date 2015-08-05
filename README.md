@@ -141,8 +141,8 @@ curiodb {
     "http://127.0.0.1:2600", // HTTP server using JSON.
   ]
 
-  persist-after = 1000       // Like "save" in Redis
-  sleep-after = 1000         // Virtual memory millisecond threshold
+  persist-after = 1 second   // Like "save" in Redis
+  sleep-after = 10 seconds   // Virtual memory millisecond threshold
   node = node1               // Current cluster node (from the
                              // nodes keys below)
   // Cluster nodes.

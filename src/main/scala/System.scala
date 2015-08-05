@@ -39,9 +39,9 @@ import scala.util.{Success, Failure, Try}
  * We always store a reference to the last snapshot's meta-data (the
  * lastSnapshot var) so that we can delete old snapshots whenever a
  * new one is saved. As for saving, this is controlled via the config
- * var curiodb.persist-after which is the number of milliseconds after
- * a command runs that writes the node's value (described as writable
- * in the commands.conf file). When one of these commands runs, we call
+ * var curiodb.persist-after which is the duration after which a
+ * command runs that writes the node's value (described as writable in
+ * the commands.conf file). When one of these commands runs, we call
  * save, which will schedule a Persist message back to the node itself.
  * This is based on the assumption that there's no guarantee an
  * actor's recieve and scheduler won't both execute at the exact same
@@ -66,15 +66,15 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   /**
    * Boolean representing whether we've scheduled an internal
    * Persist message, so that it only occurs once at a time
-   * according to the milliseconds configured by the
-   * curiodb.persist-after setting.
+   * according to the duration configured by the curiodb.persist-after
+   * setting.
    */
   var persisting: Boolean = false
 
   /**
-   * Stores the milliseconds configured by curiodb.persist-after.
+   * Stores the duration configured by curiodb.persist-after.
    */
-  val persistAfter = context.system.settings.config.getInt("curiodb.persist-after")
+  val persistAfter = context.system.settings.config.getDuration("curiodb.persist-after").toMillis.toInt
 
   /**
    * Abstract definition of each Node actor's CommandRunner that must
@@ -248,7 +248,7 @@ class NodeEntry(
  * Lastly worthy of discussion is a feature that Redis does not
  * provide, virtual memory, which simply allows a Node to persist
  * its value to disk, and shut down after a period of time (defined by
- * the curiodb.sleep-after millisecond value in reference.conf). The
+ * the curiodb.sleep-after duration value in reference.conf). The
  * difference between this occuring and a Node being deleted, is that
  * the key and NodeEntry is kept in the keyspace map. This is also why
  * the ActorRef for each Node in a NodeEntry is an Option - a value of
@@ -276,7 +276,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * type that the command belongs to.
    */
   val wrongType = ErrorReply("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
-  val sleepAfter = context.system.settings.config.getInt("curiodb.sleep-after")
+  val sleepAfter = context.system.settings.config.getDuration("curiodb.sleep-after").toMillis.toInt
   val sleepEnabled = sleepAfter > 0
 
   /**

@@ -62,7 +62,7 @@ class HttpClientNode(input: Seq[String], connection: ActorRef) extends ClientNod
       connection ! (response match {
         case ErrorReply(msg, _) => HttpResponse(status = StatusCodes.BadRequest, entity = msg + "\n")
         case _ => HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`application/json`),
-                                                   Map("result" -> toJson(response)).toJson.toString))
+                                                   Map("result" -> toJson(response)).toJson.toString + "\n"))
       })
       stop
   }: Receive) orElse super.receiveCommand
