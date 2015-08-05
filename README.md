@@ -142,7 +142,7 @@ curiodb {
   ]
 
   persist-after = 1 second   // Like "save" in Redis
-  sleep-after = 10 seconds   // Virtual memory millisecond threshold
+  sleep-after = 10 seconds   // Virtual memory threshold
   node = node1               // Current cluster node (from the
                              // nodes keys below)
   // Cluster nodes.
