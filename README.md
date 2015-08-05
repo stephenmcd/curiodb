@@ -141,10 +141,10 @@ curiodb {
     "http://127.0.0.1:2600", // HTTP server using JSON.
   ]
 
-  persist-after = 1 second   // Like "save" in Redis
-  sleep-after = 10 seconds   // Virtual memory threshold
+  persist-after = 1 second   // Like "save" in Redis.
+  sleep-after = 10 seconds   // Virtual memory threshold.
   node = node1               // Current cluster node (from the
-                             // nodes keys below)
+                             // "nodes" keys below).
   // Cluster nodes.
   nodes = {
     node1: "tcp://127.0.0.1:9001"
