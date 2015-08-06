@@ -29,15 +29,16 @@ import spray.json._
 import spray.json.DefaultJsonProtocol._
 
 /**
- * ClientNode that manages a single HTTP request - it receives the
- * parsed command arguments from the HttpServer actor, and constructs
- * a Command payload from them, and then waits to receive back a
- * Response payload that it converts back to JSON before sending it
- * back as a HTTP response.
+ * ClientNode that manages a single HTTP request - it extracts the JSON
+ * args list from it and constructs a Command payload from them, and
+ * then waits to receive back a Response payload, which it converts
+ * back to JSON before returning it as a HTTP response.
+ *
+ * In the case of SUBSCRIBE/PSUBSCRIBE commands, state is changed into
+ * a chunked mode which holds the connection open and can send multiple
+ * PubSub messages back as chunked responses.
  */
-class HttpClientNode(input: Seq[String], connection: ActorRef) extends ClientNode {
-
-  sendCommand(input)
+class HttpClientNode extends ClientNode {
 
   /**
    * Converts a response to JSON - we need to deal with each type
@@ -54,44 +55,87 @@ class HttpClientNode(input: Seq[String], connection: ActorRef) extends ClientNod
   }
 
   /**
-   * Handles receiving the Response payload back for a command, which
-   * it then converts back to JSON and returns it as a HttpResponse.
+   * Parses the JSON arg list from a POST HttpRequest.
+   */
+  def fromJson(entity: String): Option[Seq[String]] =
+    Try(entity.parseJson.asJsObject.getFields("args")(0).convertTo[Seq[String]]) match {
+      case Success(input) => Some(input)
+      case Failure(_)     => None
+    }
+
+  /**
+   * Shortcut for a 400 HttpResponse with an error message.
+   */
+  def errorResponse(entity: String): HttpResponse =
+    HttpResponse(status = StatusCodes.BadRequest, entity = entity + "\n")
+
+  /**
+   * Shortcut for a 200 HttpResponse with a JSON entity.
+   */
+  def jsonResponse(json: String): HttpResponse =
+    HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`application/json`), json))
+
+  /**
+   * Constructs the final JSON object from a Response payload.
+   */
+  def jsonEntity(response: Any): String =
+    Map("result" -> toJson(response)).toJson.toString + "\n"
+
+  /**
+   * Handles parsing a JSON arg list from a POST HttpRequest, and
+   * constructing a Command payload from it, and receiving the Response
+   * payload back for the command, which it then converts back to JSON
+   * and sends it back to the client connection.
    */
   override def receiveCommand: Receive = ({
+
+    case HttpRequest(HttpMethods.POST, Uri.Path("/"), _, entity, _) =>
+      fromJson(entity.asString) match {
+        case Some(input) => sendCommand(input); if (command.name.endsWith("SUBSCRIBE")) context.become(chunked)
+        case None        => sender() ! errorResponse("Missing valid JSON object with 'args' key")
+      }
+
+    // Fallback for any other HttpRequest, just return 404.
+    case _: HttpRequest => sender() ! HttpResponse(status = StatusCodes.NotFound)
+
+    // Triggers cleanup for PubSub etc.
+    case _: Http.ConnectionClosed => stop
+
     case Response(_, response) =>
-      connection ! (response match {
-        case ErrorReply(msg, _) => HttpResponse(status = StatusCodes.BadRequest, entity = msg + "\n")
-        case _ => HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`application/json`),
-                                                   Map("result" -> toJson(response)).toJson.toString + "\n"))
+      client.get ! (response match {
+        case ErrorReply(msg, _) => errorResponse(msg)
+        case _                  => jsonResponse(jsonEntity(response))
       })
-      stop
+
   }: Receive) orElse super.receiveCommand
+
+  /**
+   * Receive handler for PubSub messages - the first response received
+   * starts chunked messages with ChunkedResponseStart, and subsequent
+   * messages then use MessageChunk. These states fall back to
+   * receiveCommand to retain "Http.ConnectionClosed => stop" for
+   * PubSub cleanup.
+   */
+  def chunked: Receive = ({
+    case Response(_, response) =>
+      client.get ! ChunkedResponseStart(jsonResponse(jsonEntity(response)))
+      context.become({
+        case Response(_, response) => client.get ! MessageChunk(jsonEntity(response))
+      }: Receive) orElse receiveCommand)
+  }: Receive) orElse receiveCommand
 
 }
 
 /**
- * Bridge with spray-can that receives an incoming HTTP request and
- * extracts the JSON args list from it, which it then passes onto a
- * a HttpClientNode actor to run as a command.
+ * Actor for the HTTP server that registers creation of a
+ * HttpClientNode for each connection made.
  */
 class HttpServer(listen: URI) extends Actor {
 
   IO(Http)(context.system) ! Http.Bind(self, interface = listen.getHost, port = listen.getPort)
 
   def receive: Receive = LoggingReceive {
-
-    case _: Http.Connected => sender() ! Http.Register(self)
-
-    case HttpRequest(HttpMethods.POST, Uri.Path("/"), _, entity, _) =>
-      Try(entity.asString.parseJson.asJsObject.getFields("args")(0).convertTo[Seq[String]]) match {
-        case Success(input) => context.actorOf(Props(classOf[HttpClientNode], input, sender()))
-        case Failure(_) =>
-          val error = "Missing valid JSON object with 'args' key\n"
-          sender() ! HttpResponse(status = StatusCodes.BadRequest, entity = error)
-      }
-
-    case _: HttpRequest =>  sender() ! HttpResponse(status = StatusCodes.NotFound)
-
+    case _: Http.Connected => sender() ! Http.Register(context.actorOf(Props[HttpClientNode]))
   }
 
 }
@@ -176,11 +220,12 @@ class TcpClientNode extends ClientNode {
       while ({parsed = fromRedis; parsed.isDefined})
         sendCommand(parsed.get)
 
+    // Triggers cleanup for PubSub etc.
     case Tcp.PeerClosed => stop
 
     case Response(_, response) => client.get ! Tcp.Write(ByteString(toRedis(response)))
 
-  }: Receive) orElse receivePubSub orElse super.receiveCommand
+  }: Receive) orElse super.receiveCommand
 
 }
 
@@ -193,7 +238,7 @@ class TcpServer(listen: URI) extends Actor {
   IO(Tcp)(context.system) ! Tcp.Bind(self, new InetSocketAddress(listen.getHost, listen.getPort))
 
   def receive: Receive = LoggingReceive {
-    case Tcp.Connected(_, _) => sender() ! Tcp.Register(context.actorOf(Props[TcpClientNode]))
+    case _: Tcp.Connected => sender() ! Tcp.Register(context.actorOf(Props[TcpClientNode]))
   }
 
 }

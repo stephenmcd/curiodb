@@ -160,8 +160,9 @@ curiodb {
 As alluded to in the configuration example above, CurioDB also supports
 a HTTP/JSON API, as well as the same wire protocol that Redis
 implements over TCP. Commands are issued with POST requests containing
-a JSON map with a single `args` key, containing an Array of arguments.
-Responses are returned as a JSON map with a single `result` key:
+a JSON Object with a single `args` key, containing an Array of
+arguments. Responses are returned as a JSON Object with a single
+`result` key:
 
 ```
 $ curl -X POST -d '{"args": ["set", "foo", "bar"]}' http://127.0.0.1:2600
@@ -171,8 +172,14 @@ $ curl -X POST -d '{"args": ["mget", "foo", "baz"]}' http://127.0.0.1:2600
 {"result":["bar",null]}
 ```
 
-In the case of errors such as invalid arguments, a response with a 400
-status is returned, with an error message in the response body.
+`SUBSCRIBE` and `PSUBSCRIBE` commands are fully supported by the HTTP
+API, by using chunked transfer encoding to allow a single HTTP
+connection to receive a stream of published messages over an extended
+period of time.
+
+In the case of errors such as invalid arguments to a command, a
+response with a 400 status is returned, with an error message in the
+response body.
 
 ## Disadvantages over Redis
 
