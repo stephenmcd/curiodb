@@ -119,7 +119,7 @@ class HttpClientNode extends ClientNode {
   def chunked: Receive = ({
     case Response(_, response) =>
       client.get ! ChunkedResponseStart(jsonResponse(jsonEntity(response)))
-      context.become({
+      context.become(({
         case Response(_, response) => client.get ! MessageChunk(jsonEntity(response))
       }: Receive) orElse receiveCommand)
   }: Receive) orElse receiveCommand
