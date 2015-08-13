@@ -184,7 +184,7 @@ socket.onmessage = function(response) {
   console.log(JSON.parse(response.data));
 };
 
-socket.send(sock.send(JSON.stringify({args: ["DEL", "foo"]})));
+socket.send(JSON.stringify({args: ["DEL", "foo"]}));
 ```
 
 `SUBSCRIBE` and `PSUBSCRIBE` commands work as expected over WebSockets,
