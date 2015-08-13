@@ -1,12 +1,11 @@
 /**
- * TCP and HTTP servers, and main entry point to the program.
+ * TCP, HTTP, and WebSocket servers, and main entry point to the program.
  *
- * Both the TCP and HTTP servers are modelled similarly - they
- * each have a single server actor that takes incoming requests,
- * and constructs ClientNode actors for each request. The ClientNode
- * actors are responsible for constructing a Command payload, routing
- * it, and converting a Response payload back into the appropriate
- * format.
+ * All the servers are modelled similarly - they each have a single
+ * server actor that takes incoming requests, and constructs subclassed
+ * ClientNode actors for each request. The ClientNode actors are
+ * responsible for constructing a Command payload, routing it, and
+ * converting a Response payload back into the appropriate format.
  */
 
 package curiodb
@@ -24,25 +23,26 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.util.{Success, Failure, Try}
 import spray.can.Http
+import spray.can.server.UHttp
+import spray.can.websocket.frame.{TextFrame}
+import spray.can.websocket.WebSocketServerWorker
 import spray.http._
 import spray.json._
 import spray.json.DefaultJsonProtocol._
 
 /**
- * ClientNode that manages a single HTTP request - it extracts the JSON
- * args list from it and constructs a Command payload from them, and
- * then waits to receive back a Response payload, which it converts
- * back to JSON before returning it as a HTTP response.
- *
- * In the case of SUBSCRIBE/PSUBSCRIBE commands, state is changed into
- * a chunked mode which holds the connection open and can send multiple
- * PubSub messages back as chunked responses.
+ * Base ClientNode for HTTP and WebSocket ClientNode actors - provides
+ * methods for converting to/from JSON, and cleanup on disconnect.
  */
-class HttpClientNode extends ClientNode {
+abstract class JsonClientNode extends ClientNode {
+
+  val MISSING_ARG = "Missing valid JSON object with 'args' key"
 
   /**
    * Converts a response to JSON - we need to deal with each type
    * specifically so that spray-json knows what to do with it.
+   * ErrorReply is omitted, since different actions are taken when
+   * errors are returned.
    */
   def toJson(response: Any): JsValue = response match {
     case x: Iterable[Any] => x.map(toJson).toJson
@@ -55,13 +55,38 @@ class HttpClientNode extends ClientNode {
   }
 
   /**
-   * Parses the JSON arg list from a POST HttpRequest.
+   * Parses a JSON arg list from a HttpRequest or WebSocket TextFrame.
    */
   def fromJson(entity: String): Option[Seq[String]] =
     Try(entity.parseJson.asJsObject.getFields("args")(0).convertTo[Seq[String]]) match {
       case Success(input) => Some(input)
       case Failure(_)     => None
     }
+
+  /**
+   * Constructs the final JSON object from a Response payload.
+   */
+  def jsonResult(response: Any): String =
+    Map("result" -> toJson(response)).toJson.toString + "\n"
+
+  // Triggers cleanup for PubSub etc.
+  override def receiveCommand: Receive = ({
+    case _: Http.ConnectionClosed => stop
+  }: Receive) orElse super.receiveCommand
+
+}
+
+/**
+ * ClientNode that manages a single HTTP request - it extracts the JSON
+ * args list from it and constructs a Command payload from them, and
+ * then waits to receive back a Response payload, which it converts
+ * back to JSON before returning it as a HTTP response.
+ *
+ * In the case of SUBSCRIBE/PSUBSCRIBE commands, state is changed into
+ * a chunked mode which holds the connection open and can send multiple
+ * PubSub messages back as chunked responses.
+ */
+class HttpClientNode extends JsonClientNode {
 
   /**
    * Shortcut for a 400 HttpResponse with an error message.
@@ -76,12 +101,6 @@ class HttpClientNode extends ClientNode {
     HttpResponse(entity = HttpEntity(ContentType(MediaTypes.`application/json`), json))
 
   /**
-   * Constructs the final JSON object from a Response payload.
-   */
-  def jsonEntity(response: Any): String =
-    Map("result" -> toJson(response)).toJson.toString + "\n"
-
-  /**
    * Handles parsing a JSON arg list from a POST HttpRequest, and
    * constructing a Command payload from it, and receiving the Response
    * payload back for the command, which it then converts back to JSON
@@ -92,19 +111,16 @@ class HttpClientNode extends ClientNode {
     case HttpRequest(HttpMethods.POST, Uri.Path("/"), _, entity, _) =>
       fromJson(entity.asString) match {
         case Some(input) => sendCommand(input); if (command.name.endsWith("SUBSCRIBE")) context.become(chunked)
-        case None        => sender() ! errorResponse("Missing valid JSON object with 'args' key")
+        case None        => sender() ! errorResponse(MISSING_ARG)
       }
 
     // Fallback for any other HttpRequest, just return 404.
     case _: HttpRequest => sender() ! HttpResponse(status = StatusCodes.NotFound)
 
-    // Triggers cleanup for PubSub etc.
-    case _: Http.ConnectionClosed => stop
-
     case Response(_, response) =>
       client.get ! (response match {
         case ErrorReply(msg, _) => errorResponse(msg)
-        case _                  => jsonResponse(jsonEntity(response))
+        case _                  => jsonResponse(jsonResult(response))
       })
 
   }: Receive) orElse super.receiveCommand
@@ -118,9 +134,9 @@ class HttpClientNode extends ClientNode {
    */
   def chunked: Receive = ({
     case Response(_, response) =>
-      client.get ! ChunkedResponseStart(jsonResponse(jsonEntity(response)))
+      client.get ! ChunkedResponseStart(jsonResponse(jsonResult(response)))
       context.become(({
-        case Response(_, response) => client.get ! MessageChunk(jsonEntity(response))
+        case Response(_, response) => client.get ! MessageChunk(jsonResult(response))
       }: Receive) orElse receiveCommand)
   }: Receive) orElse receiveCommand
 
@@ -132,10 +148,61 @@ class HttpClientNode extends ClientNode {
  */
 class HttpServer(listen: URI) extends Actor {
 
-  IO(Http)(context.system) ! Http.Bind(self, interface = listen.getHost, port = listen.getPort)
+  IO(UHttp)(context.system) ! Http.Bind(self, interface = listen.getHost, port = listen.getPort)
 
   def receive: Receive = LoggingReceive {
     case _: Http.Connected => sender() ! Http.Register(context.actorOf(Props[HttpClientNode]))
+  }
+
+}
+
+class WebSocketClientNode(val serverConnection: ActorRef) extends JsonClientNode with WebSocketServerWorker {
+
+  /**
+   * Shortcut for a JSON object with an error value.
+   */
+  def errorResult(error: String): String =
+    Map("error" -> error).toJson.toString
+
+  /**
+   * Setup required for spray-websocket.
+   */
+  override def receive: Receive = handshaking orElse businessLogic
+
+  /**
+   * Main Receive method - handles incoming and outgoing TextFrame
+   * payloads, which all use JSON strings.
+   */
+  override def businessLogic: Receive = ({
+
+    case TextFrame(data) =>
+      fromJson(data.decodeString("UTF-8")) match {
+        case Some(input) => sendCommand(input)
+        case None        => sender() ! errorResult(MISSING_ARG)
+      }
+
+    case Response(_, response) =>
+      client.get ! TextFrame(response match {
+        case ErrorReply(msg, _) => errorResult(msg)
+        case _                  => jsonResult(response)
+      })
+
+  }: Receive) orElse receiveCommand
+
+}
+
+/**
+ * Actor for the WebSocket server that registers creation of a
+ * WebSocketClientNode for each connection made.
+ */
+class WebSocketServer(listen: URI) extends Actor {
+
+  IO(UHttp)(context.system) ! Http.Bind(self, interface = listen.getHost, port = listen.getPort)
+
+  def receive: Receive = LoggingReceive {
+    case _: Http.Connected =>
+      val serverConnection = sender()
+      serverConnection ! Http.Register(context.actorOf(Props(classOf[WebSocketClientNode], serverConnection)))
   }
 
 }
@@ -292,11 +359,13 @@ object CurioDB {
       system.actorOf(Props[KeyNode].withRouter(FromConfig()), name = "keys")
 
       config.getStringList("curiodb.listen").map(new URI(_)).foreach {uri =>
-        uri.getScheme.toLowerCase match {
-          case "http" => system.actorOf(Props(new HttpServer(uri)), "http-server")
-          case "tcp"  => system.actorOf(Props(new TcpServer(uri)), "tcp-server")
-        }
-        println(s"Listening on ${uri}")
+        val scheme = uri.getScheme.toLowerCase
+        system.actorOf(Props(scheme match {
+          case "http" => classOf[HttpServer]
+          case "tcp"  => classOf[TcpServer]
+          case "ws"   => classOf[WebSocketServer]
+        }, uri), s"$scheme-server")
+        println(s"$scheme-server listening on ${uri}")
       }
 
     }

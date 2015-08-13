@@ -139,6 +139,7 @@ curiodb {
   listen = [
     "tcp://127.0.0.1:6379",  // TCP server using Redis protocol.
     "http://127.0.0.1:2600", // HTTP server using JSON.
+    "ws://127.0.0.1:6200",   // WebSocket server, also using JSON.
   ]
 
   persist-after = 1 second   // Like "save" in Redis.
@@ -155,31 +156,46 @@ curiodb {
 }
 ```
 
-## HTTP/JSON API
+## HTTP/WebSocket JSON API
 
 As alluded to in the configuration example above, CurioDB also supports
-a HTTP/JSON API, as well as the same wire protocol that Redis
-implements over TCP. Commands are issued with POST requests containing
-a JSON Object with a single `args` key, containing an Array of
-arguments. Responses are returned as a JSON Object with a single
-`result` key:
+a HTTP/WebSocket JSON API, as well as the same wire protocol that Redis
+implements over TCP. Commands are issued with HTTP POST requests, or
+WebSocket messages, containing a JSON Object with a single `args` key,
+containing an Array of arguments. Responses are returned as a JSON
+Object with a single `result` key.
+
+HTTP:
 
 ```
-$ curl -X POST -d '{"args": ["set", "foo", "bar"]}' http://127.0.0.1:2600
+$ curl -X POST -d '{"args": ["SET", "foo", "bar"]}' http://127.0.0.1:2600
 {"result":"OK"}
 
-$ curl -X POST -d '{"args": ["mget", "foo", "baz"]}' http://127.0.0.1:2600
+$ curl -X POST -d '{"args": ["MGET", "foo", "baz"]}' http://127.0.0.1:2600
 {"result":["bar",null]}
 ```
 
-`SUBSCRIBE` and `PSUBSCRIBE` commands are fully supported by the HTTP
-API, by using chunked transfer encoding to allow a single HTTP
-connection to receive a stream of published messages over an extended
-period of time.
+WebSocket:
 
-In the case of errors such as invalid arguments to a command, a
-response with a 400 status is returned, with an error message in the
-response body.
+```
+var socket = new WebSocket('ws://127.0.0.1:6200');
+
+socket.onmessage = function(response) {
+  console.log(JSON.parse(response.data));
+};
+
+socket.send(sock.send(JSON.stringify({args: ["DEL", "foo"]})));
+```
+
+`SUBSCRIBE` and `PSUBSCRIBE` commands work as expected over WebSockets,
+and are also fully supported by the HTTP API, by using chunked transfer encoding to allow a single HTTP connection to receive a stream of
+published messages over an extended period of time.
+
+In the case of errors such as invalid arguments to a command, WebSocket
+connections will transmit a JSON Object with a single `error` key
+containing the error message, while HTTP requests will return a
+response with a 400 status, contaning the error message in the response
+body.
 
 ## Disadvantages over Redis
 

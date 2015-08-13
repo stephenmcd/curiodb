@@ -37,6 +37,7 @@ object CurioDB extends Build {
         "com.typesafe.akka" %% "akka-cluster" % akkaV,
         "io.spray" %% "spray-can" % sprayV,
         "io.spray" %% "spray-json" % "1.3.2",
+        "com.wandoulabs.akka" %% "spray-websocket" % "0.1.4",
         "org.luaj" % "luaj-jse" % "3.0.1"
       ),
       assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript =
