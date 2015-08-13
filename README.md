@@ -188,7 +188,8 @@ socket.send(sock.send(JSON.stringify({args: ["DEL", "foo"]})));
 ```
 
 `SUBSCRIBE` and `PSUBSCRIBE` commands work as expected over WebSockets,
-and are also fully supported by the HTTP API, by using chunked transfer encoding to allow a single HTTP connection to receive a stream of
+and are also fully supported by the HTTP API, by using chunked transfer
+encoding to allow a single HTTP connection to receive a stream of
 published messages over an extended period of time.
 
 In the case of errors such as invalid arguments to a command, WebSocket
