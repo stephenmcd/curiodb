@@ -38,7 +38,7 @@ object CurioDB extends Build {
     resolvers += "spray repo" at "http://repo.spray.io",
     libraryDependencies ++= dependencies,
     assemblyOption in assembly := (assemblyOption in assembly).value.copy(prependShellScript =
-      Option(Seq("#!/usr/bin/env sh", """exec java -jar "$0" "$@" """))),
+      Option(Seq("#!/usr/bin/env sh", s"""exec -a ${name.value} java -jar "$$0" "$$@" """))),
     assemblyJarName in assembly := s"${name.value}-${version.value}",
     assemblyMergeStrategy in assembly := {
       case PathList(ps @ _*) if ps.takeRight(2).mkString("/") == "leveldb/DB.class" => MergeStrategy.first
