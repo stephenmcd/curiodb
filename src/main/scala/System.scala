@@ -8,6 +8,7 @@ import akka.actor.{ActorLogging, ActorRef, Cancellable, Props}
 import akka.dispatch.ControlMessage
 import akka.event.LoggingReceive
 import akka.persistence._
+import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -525,6 +526,13 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   var db = command.db
 
+  /**
+   * ActorRef for the client socket - we store it once a complete
+   * Redis protocol packet arrives, so that we can send it the
+   * command's response when it arrives back.
+   */
+  val disabledCommands = context.system.settings.config.getStringList("curiodb.commands.disabled").map(_.toUpperCase).toSet
+
   def run: CommandRunner = ({
     case "SELECT"       => db = args(0); SimpleReply()
     case "ECHO"         => args(0)
@@ -543,6 +551,8 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   def validate: Option[ErrorReply] = {
     if (command.nodeType == "")
       Some(ErrorReply(s"unknown command '${command.name}'"))
+    else if (disabledCommands.contains(command.name))
+      Some(ErrorReply(s"command '${command.name}' is disabled"))
     else if ((command.key == "" && Commands.keyed(command.name))
         || !Commands.argsInRange(command.name, command.args))
       Some(ErrorReply(s"wrong number of arguments for '${command.name}' command"))
