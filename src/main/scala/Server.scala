@@ -18,6 +18,7 @@ import akka.routing.FromConfig
 import akka.util.ByteString
 import com.typesafe.config.ConfigFactory
 import java.net.{InetSocketAddress, URI}
+import java.io.File
 import scala.collection.JavaConversions._
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
@@ -335,8 +336,9 @@ object CurioDB {
   def main(args: Array[String]): Unit = {
 
     val sysName   = "curiodb"
-    val config    = ConfigFactory.load()
-    val node      = if (args.isEmpty) config.getString("curiodb.node") else args(0)
+    val options   = args.map(x => x.split("=")).map(x => x(0).dropWhile(_ == '-') -> x(1)).toMap
+    val config    = ConfigFactory.load(ConfigFactory.parseFile(new File(options.getOrElse("config", ""))))
+    val node      = config.getString("curiodb.node")
     val nodes     = config.getObject("curiodb.nodes").map(n => (n._1 -> new URI(n._2.unwrapped.toString)))
     val keyNodes  = nodes.size * config.getInt("akka.actor.deployment./keys.cluster.max-nr-of-instances-per-node")
     val seedNodes = nodes.values.map(u => s""" "akka.${u.getScheme}://${sysName}@${u.getHost}:${u.getPort}" """)
