@@ -14,15 +14,18 @@ that done, you just need to clone this repository and run it:
 ```
 $ git clone git://github.com/stephenmcd/curiodb.git
 $ cd curiodb
-$ sbt run
+$ sbt run --config=path/to/config.file
 ```
 
 You can also build a binary (executable JAR file):
 
 ```
 $ sbt assembly
-$ ./target/scala-2.11/curiodb-0.0.1
+$ ./target/scala-2.11/curiodb-0.0.1 --config=path/to/config.file
 ```
+
+Note that the `--config=path/to/config.file` argument is optional, see
+the *Configuration* section below for more detail.
 
 ## Overview
 
@@ -127,25 +130,26 @@ Not diagrammed, but in addition to the above:
 
 ## Configuration
 
-Here are the few default configuration settings CurioDB implements,
-along with the large range of settings [provided by Akka][akka-config]
-itself, which both use [typesafe-config][typesafe-config] -
-consult those projects for more info.
+Here are the few configuration settings and their default values that
+CurioDB implements, along with the large range of settings
+[provided by Akka][akka-config] itself, which both use
+[typesafe-config][typesafe-config] - consult those projects for more
+info.
 
 ```
 curiodb {
 
   // Addresses listening for clients.
   listen = [
-    "tcp://127.0.0.1:6379",  // TCP server using Redis protocol.
-    "http://127.0.0.1:2600", // HTTP server using JSON.
-    "ws://127.0.0.1:6200",   // WebSocket server, also using JSON.
+    "tcp://127.0.0.1:6379"    // TCP server using Redis protocol.
+    "http://127.0.0.1:2600"   // HTTP server using JSON.
+    "ws://127.0.0.1:6200"     // WebSocket server, also using JSON.
   ]
 
-  persist-after = 1 second   // Like "save" in Redis.
-  sleep-after = 10 seconds   // Virtual memory threshold.
-  node = node1               // Current cluster node (from the
-                             // "nodes" keys below).
+  persist-after = 1 second    // Like "save" in Redis.
+  sleep-after   = 10 seconds  // Virtual memory threshold.
+  node          = node1       // Current cluster node (from the
+                              // "nodes" keys below).
   // Cluster nodes.
   nodes = {
     node1: "tcp://127.0.0.1:9001"
@@ -153,7 +157,22 @@ curiodb {
     // node3: "tcp://127.0.0.1:9003"
   }
 
+  // List of disabled commands.
+  commands.disabled = [SHUTDOWN]
+
 }
+```
+
+You can also optionally provide your own configuration file, using the
+`--config=path/to/config.file` command-line argument. Your
+configuration file need only define the values you wish to override.
+For example, suppose you wanted to only listen over TCP, and disable
+extra commands:
+
+```
+curiodb.listen = ["tcp://127.0.0.1:3333"]
+
+curiodb.commands.disabled = [SHUTDOWN, DEL, FLUSHDB, FLUSHALL]
 ```
 
 ## HTTP/WebSocket JSON API
