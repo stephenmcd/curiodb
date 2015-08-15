@@ -12,7 +12,7 @@ object CurioDB extends Build {
 
   val dependencies = Seq(
     "com.typesafe.akka"   %% "akka-actor" % akkaV,
-    "com.typesafe.akka"   %% "akka-persistence-experimental" % akkaV,
+    "com.typesafe.akka"   %% "akka-persistence" % akkaV,
     "com.typesafe.akka"   %% "akka-cluster" % akkaV,
     "io.spray"            %% "spray-can" % sprayV,
     "io.spray"            %% "spray-json" % "1.3.2",
