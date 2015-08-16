@@ -89,7 +89,7 @@ By default, CurioDB uses Akka's built-in [LevelDB storage][leveldb-storage].
 Here's a bad diagram representing one server in the cluster, and the
 flow of a client sending a command:
 
-![Image](http://i.imgur.com/9KkP9uZ.png)
+<p align="center"><img src="http://blog.jupo.org/static/img/curiodb.png"></p>
 
 * An outside client sends a command to the server actor
   ([Server.scala][server-source]). There's at most one per cluster node
