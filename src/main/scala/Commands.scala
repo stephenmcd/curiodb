@@ -58,7 +58,7 @@ object Commands {
   def attribute(commandName: String, attributeName: String, default: String): String = {
     commandSet(commandName).map(_._2) match {
       case Some(set) => set.getOrElse(commandName, Map[String, String]()).getOrElse(attributeName, default)
-      case None => default
+      case None      => default
     }
   }
 
@@ -67,6 +67,14 @@ object Commands {
    */
   def keyed(commandName: String): Boolean =
     attribute(commandName, "keyed", "true") != "false"
+
+  /**
+   * Returns if the command is considered "keyed" for routing purposes,
+   * but doesn't actually store a value in a Node, eg PubSub channels
+   * and Lua script hashes.
+   */
+  def pseudoKeyed(commandName: String): Boolean =
+    attribute(commandName, "pseudoKeyed", "false") == "true"
 
   /**
    * Returns if the command writes its node's value.

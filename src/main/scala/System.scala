@@ -75,7 +75,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   /**
    * Stores the duration configured by curiodb.persist-after.
    */
-  val persistAfter = context.system.settings.config.getDuration("curiodb.persist-after").toMillis.toInt
+  val persistAfter = durationSetting("curiodb.persist-after")
 
   /**
    * Abstract definition of each Node actor's CommandRunner that must
@@ -179,6 +179,17 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
     } else sorted
   }
 
+  /**
+   * Retrieves a duration config setting as milliseconds, and handles
+   * the value not being a duration value, so we can do something like
+   * set it to "off", in which case we default to 0.
+   */
+  def durationSetting(name: String): Int =
+    Try(context.system.settings.config.getDuration(name).toMillis.toInt) match {
+      case Success(ms) => ms
+      case Failure(_)  => 0
+    }
+
 }
 
 // Following are some messages we send to nodes.
@@ -277,8 +288,17 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * type that the command belongs to.
    */
   val wrongType = ErrorReply("Operation against a key holding the wrong kind of value", prefix = "WRONGTYPE")
-  val sleepAfter = context.system.settings.config.getDuration("curiodb.sleep-after").toMillis.toInt
-  val sleepEnabled = sleepAfter > 0
+
+  /**
+   * Milliseconds after which a Node should persist its value to disk,
+   * and shut down, (aka sleep).
+   */
+  val sleepAfter  = durationSetting("curiodb.sleep-after")
+
+  /**
+   * Milliseconds after which a Node automatically expires itself.
+   */
+  val expireAfter = durationSetting("curiodb.expire-after")
 
   /**
    * Shortcut for grabbing the String/NodeEntry map (aka DB) for the
@@ -306,7 +326,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   /**
    * Initiates expiry on a node when any of the relevant commands are
-   * run, namely EXPIRE/PEXPIRE/EXPIREAT/PEXPIREAT.
+   * run, namely EXPIRE/PEXPIRE/EXPIREAT/PEXPIREAT, or when the
+   * "expire-after" setting is configured.
    */
   def expire(when: Long): Int = {
     persist
@@ -412,7 +433,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * we persists the keyspace to disk.
    */
   def create(db: String, key: String, nodeType: String, recovery: Boolean = false): Option[ActorRef] = {
-    val node = if (recovery && sleepEnabled) None else Some(context.actorOf(nodeType match {
+    val node = if (recovery && sleepAfter > 0) None else Some(context.actorOf(nodeType match {
       case "string"      => Props[StringNode]
       case "bitmap"      => Props[BitmapNode]
       case "hyperloglog" => Props[HyperLogLogNode]
@@ -467,16 +488,10 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
         val overwrite = !db.get(command.key).filter(_.nodeType != command.nodeType).isEmpty
         if (Commands.overwrites(command.name) && overwrite) delete(command.key)
         node ! command
-        if (command.name match {
-          // TODO: This list of commands should be represented somewhere
-          // else, possibly as a new attribute in commands.conf. It might
-          // be called "pseudokeyed" (replacing their use of "keyed"), as
-          // these are the commands that leverage key distribution but
-          // don't have a node that can actually sleep.
-          case "_SUBSCRIBE" | "_UNSUBSCRIBE" | "PUBLISH" | "_NUMSUB" | "_NUMPAT" |
-               "EVALSHA" | "_SCRIPTLOAD" | "_SCRIPTFLUSH" => false
-          case _ => sleepEnabled && Commands.keyed(command.name)
-        }) sleep
+        if (Commands.keyed(command.name) && !Commands.pseudoKeyed(command.name)) {
+          if (sleepAfter > 0) sleep
+          if (expireAfter > 0) expire(System.currentTimeMillis + expireAfter)
+        }
     }
   }: Receive) orElse super.receiveCommand
 

@@ -146,16 +146,20 @@ curiodb {
     "ws://127.0.0.1:6200"     // WebSocket server, also using JSON.
   ]
 
+  // Duration settings (either time value, or "off").
   persist-after = 1 second    // Like "save" in Redis.
   sleep-after   = 10 seconds  // Virtual memory threshold.
-  node          = node1       // Current cluster node (from the
-                              // "nodes" keys below).
+  expire-after  = off         // Automatic key expiry.
+
   // Cluster nodes.
   nodes = {
     node1: "tcp://127.0.0.1:9001"
     // node2: "tcp://127.0.0.1:9002"
     // node3: "tcp://127.0.0.1:9003"
   }
+
+  // Current cluster node (from the "nodes" keys above).
+  node = node1
 
   // List of disabled commands.
   commands.disabled = [SHUTDOWN]
@@ -174,6 +178,16 @@ curiodb.listen = ["tcp://127.0.0.1:3333"]
 
 curiodb.commands.disabled = [SHUTDOWN, DEL, FLUSHDB, FLUSHALL]
 ```
+
+The `sleep-after` and `expire-after` settings are worth some
+explanation. Each of these configure a time duration that starts each
+time a command is run against a key, and elapses if no further commands
+run against that key within the duration. Once the duration elapses,
+an action is performed. After the `sleep-after` duration elapses for a
+key, it will persist its value to disk, and shut down, essentially
+going to sleep - this is how virtual memory is implemented.
+`expire-after` is similar, but after its duration elapses, the key is
+deleted entirely, just as if the `EXPIRE` command was used.
 
 ## HTTP/WebSocket JSON API
 
@@ -217,7 +231,7 @@ containing the error message, while HTTP requests will return a
 response with a 400 status, contaning the error message in the response
 body.
 
-## Disadvantages over Redis
+## Disadvantages compared to Redis
 
 * I haven't measured it, but it's safe to say memory consumption is
   much poorer due to the JVM. Somewhat alleviated by the virtual memory
