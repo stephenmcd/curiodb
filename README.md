@@ -14,7 +14,7 @@ that done, you just need to clone this repository and run it:
 ```
 $ git clone git://github.com/stephenmcd/curiodb.git
 $ cd curiodb
-$ sbt run "--config=path/to/config.file"
+$ sbt "~re-start --config=path/to/config.file"
 ```
 
 You can also build a binary (executable JAR file):

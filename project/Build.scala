@@ -2,6 +2,7 @@ import sbt._
 import sbt.Keys._
 import sbtassembly._
 import sbtassembly.AssemblyKeys._
+import spray.revolver.RevolverPlugin._
 
 object CurioDB extends Build {
 
@@ -29,7 +30,7 @@ object CurioDB extends Build {
   lazy val indexedTreeMap = RootProject(uri("git://github.com/stephenmcd/indexed-tree-map.git"))
   lazy val hyperLogLog    = RootProject(uri("git://github.com/stephenmcd/java-hll.git#with-fastutils"))
 
-  lazy val root = Project("root", file(".")).dependsOn(indexedTreeMap, hyperLogLog).settings(
+  lazy val root = Project("root", file("."), settings = Seq(
     name := "curiodb",
     version := curiodbV,
     scalaVersion in Global := scalaV,
@@ -45,6 +46,6 @@ object CurioDB extends Build {
       case x if Assembly.isConfigFile(x) => reverseConcat
       case x => (assemblyMergeStrategy in assembly).value(x)
     }
-  )
+  ) ++ Revolver.settings).dependsOn(indexedTreeMap, hyperLogLog)
 
 }
