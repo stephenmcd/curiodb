@@ -231,7 +231,7 @@ class TcpClientNode extends ClientNode {
    * If a complete packet is parsed, the buffer is cleared and its
    * contents are returned.
    */
-  def fromRedis: Option[Seq[String]] = {
+  def fromRedis(): Option[Seq[String]] = {
 
     var pos = 0
 
@@ -285,7 +285,7 @@ class TcpClientNode extends ClientNode {
     case Tcp.Received(data) =>
       var parsed: Option[Seq[String]] = None
       buffer.append(data.utf8String)
-      while ({parsed = fromRedis; parsed.isDefined})
+      while ({parsed = fromRedis(); parsed.isDefined})
         sendCommand(parsed.get)
 
     // Triggers cleanup for PubSub etc.

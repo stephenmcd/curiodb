@@ -34,7 +34,7 @@ import scala.util.{Success, Failure, Try}
  *    up older snapshots, and restoring from a snapshot on startup.
  *
  * Persistence warrants some discussion: we use akka-persistence, but
- * not completely, as event-sourcing is not used, and we rely entirely
+ * not completely, as event sourcing is not used, and we rely entirely
  * on its snapshotting feature, only ever keeping a single snapshot.
  * This was basically the easiest way to get persistence working.
  * We always store a reference to the last snapshot's meta-data (the
@@ -73,13 +73,16 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   var persisting: Boolean = false
 
   /**
-   * Stores the duration configured by curiodb.persist-after.
+   * Stores the duration which controls the minimum delay between
+   * receiving a command that writes, and persisting the actual value
+   * written.
    */
   val persistAfter = durationSetting("curiodb.persist-after")
 
   /**
    * Abstract definition of each Node actor's CommandRunner that must
-   * be implemented.
+   * be implemented. It's the partial function that matches a Command
+   * name to the code that runs it.
    */
   def run: CommandRunner
 
@@ -92,7 +95,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * Persist message to save a snapshot, if none has already been
    * scheduled, according to the value of the persisting var.
    */
-  def save: Unit = {
+  def save(): Unit = {
     if (persistAfter == 0) {
       saveSnapshot(value)
     } else if (persistAfter > 0 && !persisting) {
@@ -131,12 +134,12 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
     case SaveSnapshotSuccess(meta) => lastSnapshot = Some(meta); deleteOldSnapshots()
     case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
     case Persist    => persisting = false; saveSnapshot(value)
-    case Delete     => deleteOldSnapshots(stopping = true); stop
-    case Sleep      => stop
+    case Delete     => deleteOldSnapshots(stopping = true); stop()
+    case Sleep      => stop()
     case c: Command =>
       command = c
       respond(Try(run(command.name)) match {
-        case Success(response) => if (Commands.writes(command.name)) save; response
+        case Success(response) => if (Commands.writes(command.name)) save(); response
         case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply("Unknown error")
       })
   }
@@ -293,7 +296,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Milliseconds after which a Node should persist its value to disk,
    * and shut down, (aka sleep).
    */
-  val sleepAfter  = durationSetting("curiodb.sleep-after")
+  val sleepAfter = durationSetting("curiodb.sleep-after")
 
   /**
    * Milliseconds after which a Node automatically expires itself.
@@ -302,25 +305,16 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
 
   /**
    * Shortcut for grabbing the String/NodeEntry map (aka DB) for the
-   * given DB name.
+   * given DB name, or the current command.
    */
-  def dbFor(name: String): DB =
+  def db(name: String = command.db): DB =
     value.getOrElseUpdate(name, mutable.Map[String, NodeEntry]())
-
-  /**
-   * Shortcut for grabbing the String/NodeEntry map (aka DB) for the
-   * current Command.
-   */
-  def db: DB = dbFor(command.db)
 
   /**
    * Cancels expiry on a node when the PERSIST command is run.
    */
-  def persist: Int = db(command.key).expiry match {
-    case Some((_, cancellable)) =>
-      cancellable.cancel()
-      db(command.key).expiry = None
-      1
+  def persist(): Int = db()(command.key).expiry match {
+    case Some((_, cancellable)) => cancellable.cancel(); db()(command.key).expiry = None; 1
     case None => 0
   }
 
@@ -335,7 +329,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     val cancellable = context.system.scheduler.scheduleOnce(expires) {
       self ! Command(Seq("_DEL", command.key), db = command.db)
     }
-    db(command.key).expiry = Some((when, cancellable))
+    db()(command.key).expiry = Some((when, cancellable))
     1
   }
 
@@ -348,13 +342,13 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * run against the key, the actor for the Node is then recreated,
    * with its value restored from disk.
    */
-  def sleep: Unit = {
+  def sleep(): Unit = {
     val when = sleepAfter milliseconds
     val key = command.key
-    val entry = db(key)
+    val entry = db()(key)
     entry.sleep.foreach(_.cancel())
     entry.sleep = Some(context.system.scheduler.scheduleOnce(when) {
-      db.get(key).foreach {entry =>
+      db().get(key).foreach {entry =>
         entry.node.foreach(_ ! Sleep)
         entry.node = None
       }
@@ -365,7 +359,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Retrieves the milliseconds remaining until expiry occurs for a key
    * when the TTL/PTTL commands are run.
    */
-  def ttl: Long = db(command.key).expiry match {
+  def ttl: Long = db()(command.key).expiry match {
     case Some((when, _)) => when - System.currentTimeMillis
     case None => -1
   }
@@ -376,14 +370,14 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * allow external (client facing) commands to map to a single type
    * of Node.
    */
-  def sort: Any = {
-      val entry = db(command.key)
-      entry.nodeType match {
-        case "list" | "set" | "sortedset" =>
-          val sortArgs = Seq("_SORT", command.key) ++ command.args
-          entry.node.get ! Command(sortArgs, db = command.db, destination = command.destination)
-        case _ => wrongType
-      }
+  def sort(): Any = {
+    val entry = db()(command.key)
+    entry.nodeType match {
+      case "list" | "set" | "sortedset" =>
+        val sortArgs = Seq("_SORT", command.key) ++ command.args
+        entry.node.get ! Command(sortArgs, db = command.db, destination = command.destination)
+      case _ => wrongType
+    }
   }
 
   /**
@@ -397,8 +391,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Node.
    */
   def validate: Option[Any] = {
-    val exists      = db.contains(command.key)
-    val nodeType    = if (exists) db(command.key).nodeType else ""
+    val exists      = db().contains(command.key)
+    val nodeType    = if (exists) db()(command.key).nodeType else ""
     val invalidType = (nodeType != "" && command.nodeType != nodeType &&
       command.nodeType != "keys" && !Commands.overwrites(command.name))
     val mustExist   = command.name == "LPUSHX" || command.name == "RPUSHX"
@@ -420,7 +414,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     if (command.nodeType == "keys")
       self
     else
-      db.get(command.key).flatMap(_.node) match {
+      db().get(command.key).flatMap(_.node) match {
         case Some(node) => node
         case None => create(command.db, command.key, command.nodeType).get
       }
@@ -432,7 +426,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * and restores its keyspace from disk, otherwise (the default)
    * we persists the keyspace to disk.
    */
-  def create(db: String, key: String, nodeType: String, recovery: Boolean = false): Option[ActorRef] = {
+  def create(dbName: String, key: String, nodeType: String, recovery: Boolean = false): Option[ActorRef] = {
     val node = if (recovery && sleepAfter > 0) None else Some(context.actorOf(nodeType match {
       case "string"      => Props[StringNode]
       case "bitmap"      => Props[BitmapNode]
@@ -441,9 +435,9 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       case "list"        => Props[ListNode]
       case "set"         => Props[SetNode]
       case "sortedset"   => Props[SortedSetNode]
-    }, s"$db-$nodeType-$key"))
-    dbFor(db)(key) = new NodeEntry(nodeType, node)
-    if (!recovery) save
+    }, s"$dbName-$nodeType-$key"))
+    db(dbName)(key) = new NodeEntry(nodeType, node)
+    if (!recovery) save()
     node
   }
 
@@ -451,29 +445,29 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Deletes a Node.
    */
   def delete(key: String, dbName: Option[String] = None): Boolean =
-    dbFor(dbName.getOrElse(command.db)).remove(key) match {
+    db(dbName.getOrElse(command.db)).remove(key) match {
       case Some(entry) => entry.node.foreach(_ ! Delete); true
-      case None => false
+      case None        => false
     }
 
   override def run: CommandRunner = ({
     case "_DEL"          => (command.key +: args).map(key => delete(key))
-    case "_KEYS"         => pattern(db.keys, args(0))
-    case "_RANDOMKEY"    => randomItem(db.keys)
-    case "_FLUSHDB"      => db.keys.map(key => delete(key)); SimpleReply()
-    case "_FLUSHALL"     => value.foreach(db => db._2.keys.map(key => delete(key, Some(db._1)))); SimpleReply()
-    case "EXISTS"        => args.map(db.contains)
+    case "_KEYS"         => pattern(db().keys, args(0))
+    case "_RANDOMKEY"    => randomItem(db().keys)
+    case "_FLUSHDB"      => db().keys.map(key => delete(key)); SimpleReply()
+    case "_FLUSHALL"     => value.foreach {case (dbName, entries) => entries.keys.map({key => delete(key, Some(dbName))})}; SimpleReply()
+    case "EXISTS"        => args.map(db().contains)
     case "TTL"           => ttl / 1000
     case "PTTL"          => ttl
     case "EXPIRE"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
     case "PEXPIRE"       => expire(System.currentTimeMillis + args(0).toInt)
     case "EXPIREAT"      => expire(args(0).toLong / 1000)
     case "PEXPIREAT"     => expire(args(0).toLong)
-    case "TYPE"          => if (db.contains(command.key)) db(command.key).nodeType else null
-    case "RENAMENX"      => val x = db.contains(command.key); if (x) {run("RENAME")}; x
-    case "RENAME"        => db(command.key).node.foreach(_ ! Command(Seq("_RENAME", command.key, args(0)), db = command.db)); SimpleReply()
-    case "PERSIST"       => persist
-    case "SORT"          => sort
+    case "TYPE"          => if (db().contains(command.key)) db()(command.key).nodeType else null
+    case "RENAMENX"      => val x = db().contains(command.key); if (x) {run("RENAME")}; x
+    case "RENAME"        => db()(command.key).node.foreach(_ ! Command(Seq("_RENAME", command.key, args(0)), db = command.db)); SimpleReply()
+    case "PERSIST"       => persist()
+    case "SORT"          => sort()
   }: CommandRunner) orElse runPubSub orElse runScripting
 
   /**
@@ -485,11 +479,11 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case Routable(p) => command = p; validate match {
       case Some(errorOrDefault) => respond(errorOrDefault)
       case None =>
-        val overwrite = !db.get(command.key).filter(_.nodeType != command.nodeType).isEmpty
+        val overwrite = !db().get(command.key).filter(_.nodeType != command.nodeType).isEmpty
         if (Commands.overwrites(command.name) && overwrite) delete(command.key)
         node ! command
         if (Commands.keyed(command.name) && !Commands.pseudoKeyed(command.name)) {
-          if (sleepAfter > 0) sleep
+          if (sleepAfter > 0) sleep()
           if (expireAfter > 0) expire(System.currentTimeMillis + expireAfter)
         }
     }
@@ -501,8 +495,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   override def receiveRecover: Receive = {
     case SnapshotOffer(_, snapshot) =>
-      snapshot.asInstanceOf[mutable.Map[String, DB]].foreach {db =>
-        db._2.foreach {item => create(db._1, item._1, item._2.nodeType, recovery = true)}
+      snapshot.asInstanceOf[mutable.Map[String, DB]].foreach {case (dbName, entries) =>
+        entries.foreach {case (key, entry) => create(dbName, key, entry.nodeType, recovery = true)}
       }
   }
 
@@ -529,24 +523,19 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   var value = null
 
   /**
-   * ActorRef for the client socket - we store it once a complete
-   * Redis protocol packet arrives, so that we can send it the
-   * command's response when it arrives back.
+   * ActorRef we send final responses back to.
    */
   var client: Option[ActorRef] = None
 
   /**
-   * Stores the current DB name - default, or one provided by the
-   * SELECT command.
+   * The current DB name - default, or one provided by "SELECT".
    */
   var db = command.db
 
   /**
-   * ActorRef for the client socket - we store it once a complete
-   * Redis protocol packet arrives, so that we can send it the
-   * command's response when it arrives back.
+   * List of disabled commands.
    */
-  val disabledCommands = context.system.settings.config.getStringList("curiodb.commands.disabled").map(_.toUpperCase).toSet
+  val disabled = context.system.settings.config.getStringList("curiodb.commands.disabled").map(_.toUpperCase).toSet
 
   def run: CommandRunner = ({
     case "SELECT"       => db = args(0); SimpleReply()
@@ -566,7 +555,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   def validate: Option[ErrorReply] = {
     if (command.nodeType == "")
       Some(ErrorReply(s"unknown command '${command.name}'"))
-    else if (disabledCommands.contains(command.name))
+    else if (disabled.contains(command.name))
       Some(ErrorReply(s"command '${command.name}' is disabled"))
     else if ((command.key == "" && Commands.keyed(command.name))
         || !Commands.argsInRange(command.name, command.args))

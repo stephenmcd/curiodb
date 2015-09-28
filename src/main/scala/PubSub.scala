@@ -48,7 +48,7 @@ trait PubSubServer extends CommandProcessing {
    * Responsible for omitting PubSubEvent messages back to the
    * ClientNode when a change in subscription occurs.
    */
-  def subscribeOrUnsubscribe: Unit = {
+  def subscribeOrUnsubscribe(): Unit = {
     val pattern = command.name.startsWith("_p")
     val subscriptions = if (pattern) patterns else channels
     val key = if (pattern) args(0) else command.key
@@ -66,7 +66,7 @@ trait PubSubServer extends CommandProcessing {
    * Sends a message that has been receieved (published) from a client,
    * to all matching subscriptions - either channels, or patterns.
    */
-  def publish: Int = {
+  def publish(): Int = {
     channels.get(command.key).map({subscribers =>
       val message = Response(command.key, Seq("message", command.key, args(0)))
       subscribers.foreach(_ ! message)
@@ -82,11 +82,11 @@ trait PubSubServer extends CommandProcessing {
     case "_NUMSUB"       => channels.get(command.key).map(_.size).sum
     case "_NUMPAT"       => patterns.values.map(_.size).sum
     case "_CHANNELS"     => pattern(channels.keys, args(0))
-    case "_SUBSCRIBE"    => subscribeOrUnsubscribe
-    case "_UNSUBSCRIBE"  => subscribeOrUnsubscribe
-    case "_PSUBSCRIBE"   => subscribeOrUnsubscribe
-    case "_PUNSUBSCRIBE" => subscribeOrUnsubscribe
-    case "PUBLISH"       => publish
+    case "_SUBSCRIBE"    => subscribeOrUnsubscribe()
+    case "_UNSUBSCRIBE"  => subscribeOrUnsubscribe()
+    case "_PSUBSCRIBE"   => subscribeOrUnsubscribe()
+    case "_PUNSUBSCRIBE" => subscribeOrUnsubscribe()
+    case "PUBLISH"       => publish()
   }
 
 }
@@ -115,7 +115,7 @@ trait PubSubClient extends CommandProcessing {
    * Handles all commands that subscribe or unsubsubscribe,
    * namely SUBSCRIBE/UNSUBSCRIBE/PSUBSCRIBE/PUNSUBSCRIBE.
    */
-  def subscribeOrUnsubscribe: Unit = {
+  def subscribeOrUnsubscribe(): Unit = {
     val pattern = command.name.head == 'p'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
@@ -127,10 +127,10 @@ trait PubSubClient extends CommandProcessing {
    * allows us to inform the KeyNode actors holding subscriptions to
    * our channels and patterns that we're unsubscribing.
    */
-  override def stop: Unit = {
+  override def stop(): Unit = {
     channels.foreach {x => route(Seq("_UNSUBSCRIBE", x), destination = Some(self))}
     patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), destination = Some(self), broadcast = true)}
-    super.stop
+    super.stop()
   }
 
   /**
@@ -139,10 +139,10 @@ trait PubSubClient extends CommandProcessing {
    * CommandRunner methods to form its own.
    */
   def runPubSub: CommandRunner = {
-    case "SUBSCRIBE"    => subscribeOrUnsubscribe
-    case "UNSUBSCRIBE"  => subscribeOrUnsubscribe
-    case "PSUBSCRIBE"   => subscribeOrUnsubscribe
-    case "PUNSUBSCRIBE" => subscribeOrUnsubscribe
+    case "SUBSCRIBE"    => subscribeOrUnsubscribe()
+    case "UNSUBSCRIBE"  => subscribeOrUnsubscribe()
+    case "PSUBSCRIBE"   => subscribeOrUnsubscribe()
+    case "PUNSUBSCRIBE" => subscribeOrUnsubscribe()
     case "PUBSUB"       => args(0).toUpperCase match {
       case "CHANNELS" => aggregate(Props[AggregatePubSubChannels])
       case "NUMSUB"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])

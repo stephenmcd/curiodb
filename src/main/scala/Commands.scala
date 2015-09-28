@@ -237,7 +237,7 @@ trait CommandProcessing extends Actor {
    * the chance to override it and inject extra shutdown behavior that
    * concrete actors need not know about.
    */
-  def stop: Unit = context stop self
+  def stop(): Unit = context stop self
 
   // Following are a handful of utility functions - they don't really
   // deal directly with general Command processing, but have some

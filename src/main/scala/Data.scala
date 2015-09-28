@@ -106,7 +106,7 @@ class HyperLogLogNode extends Node[HLL] {
    * The HLL class only supports longs, so we just use hashcodes of the
    * strings we want to add.
    */
-  def add: Int = {
+  def add(): Int = {
     val x = value.cardinality
     args.foreach {x => value.addRaw(x.hashCode.toLong)}
     if (x == value.cardinality) 0 else 1
@@ -117,7 +117,7 @@ class HyperLogLogNode extends Node[HLL] {
     case "_PFCOUNT" => value.cardinality.toInt
     case "_PFSTORE" => value.clear(); value = HLL.fromBytes(args.map(_.toByte).toArray); SimpleReply()
     case "_PFGET"   => value
-    case "PFADD"    => add
+    case "PFADD"    => add()
   }
 
 }
@@ -143,7 +143,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
     case "HSCAN"        => scan(value.keys)
     case "HGET"         => value.getOrElse(args(0), null)
     case "HSETNX"       => if (!value.contains(args(0))) run("HSET") else false
-    case "HGETALL"      => value.flatMap(x => Seq(x._1, x._2))
+    case "HGETALL"      => value.flatMap {case (k, v) => Seq(k, v)}
     case "HVALS"        => value.values
     case "HDEL"         => val x = run("HEXISTS"); value -= args(0); x
     case "HLEN"         => value.size
@@ -183,7 +183,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
    * scheduling its timeout. Otherwise if the list have items, we just
    * run the non-blocking version of the command.
    */
-  def block: Any = {
+  def block(): Any = {
     if (value.isEmpty) {
       blocked += command
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
@@ -213,7 +213,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
   /**
    * LINSERT command that handles BEFORE/AFTER args.
    */
-  def insert: Int = {
+  def insert(): Int = {
     val i = value.indexOf(args(1)) + (if (args.head == "AFTER") 1 else 0)
     if (i >= 0) {
       value.insert(i, args(2))
@@ -225,7 +225,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
    * LREM command - generates a new list, filtering out the given
    * item for the given count, in either direction in linear time.
    */
-  def remove: Int = {
+  def remove(): Int = {
     val item = args(0)
     val count = args(1).toInt
     var result = 0
@@ -266,15 +266,15 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
     case "RPOP"       => pop(value.size - 1)
     case "LSET"       => value(args.head.toInt) = args(1); SimpleReply()
     case "LINDEX"     => val x = args.head.toInt; if (x >= 0 && x < value.size) value(x) else null
-    case "LREM"       => remove
+    case "LREM"       => remove()
     case "LRANGE"     => slice(value)
     case "LTRIM"      => value = slice(value).asInstanceOf[mutable.ListBuffer[String]]; SimpleReply()
     case "LLEN"       => value.size
-    case "BLPOP"      => block
-    case "BRPOP"      => block
-    case "BRPOPLPUSH" => block
+    case "BLPOP"      => block()
+    case "BRPOP"      => block()
+    case "BRPOPLPUSH" => block()
     case "RPOPLPUSH"  => val x = run("RPOP"); if (x != null) {route("LPUSH" +: args :+ x.toString)}; x
-    case "LINSERT"    => insert
+    case "LINSERT"    => insert()
   }: CommandRunner) andThen unblock
 
 }

@@ -70,7 +70,7 @@ trait AggregateCommands extends CommandProcessing {
  * actor breaks the command into the individual key/name/args
  * required per key, and sends these on the normal KeyNode -> Node
  * flow, with the Aggregate actor itself being the Command destination
- * for the response, rather than a CLientNode. The Aggregate actor
+ * for the response, rather than a ClientNode. The Aggregate actor
  * knows how many responses it requires (usually given by the number of
  * keys/nodes it deals with), and once all nodes have responded, it
  * then constructs the command's Response to send back to the
@@ -108,14 +108,14 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
   /**
    * Constructs the final response to send back to the ClientNode.
    */
-  def complete: Any = ordered
+  def complete(): Any = ordered
 
   /**
    * Starts the aggregation process by sending a Command containing
    * the Aggregate subclass instance's command, for each key in the
    * originating Command.
    */
-  def begin = keys.foreach {key => route(Seq(commandName, key), destination = Some(self))}
+  def begin() = keys.foreach {key => route(Seq(commandName, key), destination = Some(self))}
 
   /**
    * Starts the aggregation process when the original Command is first
@@ -125,12 +125,12 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    * is shut down.
    */
   def receive: Receive = LoggingReceive {
-    case c: Command => command = c; begin
+    case c: Command => command = c; begin()
     case Response(key, value) =>
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
       if (responses.size == keys.size) {
-        respond(Try(complete) match {
+        respond(Try(complete()) match {
           case Success(response) => response
           case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply
         })
@@ -175,7 +175,7 @@ abstract class BaseAggregateSet extends AggregateSetReducer[mutable.Set[String]]
  * the completion process.
  */
 class AggregateSet extends BaseAggregateSet {
-  override def complete: Any = ordered.reduce(reducer)
+  override def complete(): Any = ordered.reduce(reducer)
 }
 
 /**
@@ -186,7 +186,7 @@ class AggregateSet extends BaseAggregateSet {
  * Node being written to.
  */
 class AggregateSetStore extends BaseAggregateSet {
-  override def complete: Unit =
+  override def complete(): Unit =
     route(Seq("_SSTORE", command.key) ++ ordered.reduce(reducer), destination = command.destination)
 }
 
@@ -241,7 +241,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
    * and aborting sending a response which will be handled by the final
    * Node being written to.
    */
-  override def complete: Unit = {
+  override def complete(): Unit = {
     var i = 0
     val result = ordered.reduce({(x, y) =>
       val out = new IndexedTreeMap[String, Int]()
@@ -268,7 +268,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
  */
 class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
   override def keys: Seq[String] = args.drop(2)
-  override def complete: Unit = {
+  override def complete(): Unit = {
     val result = args(0).toUpperCase match {
       case "AND" => ordered.reduce(_ & _)
       case "OR"  => ordered.reduce(_ | _)
@@ -287,7 +287,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
  * for each key given, and sums the results.
  */
 class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
-  override def complete: Long = responses.values.sum
+  override def complete(): Long = responses.values.sum
 }
 
 /**
@@ -295,7 +295,7 @@ class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
  * operation, storing the final result in the Node for the given key.
  */
 class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
-  override def complete: Unit = {
+  override def complete(): Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
     route(Seq("_PFSTORE", command.key) ++ result, destination = command.destination)
   }
@@ -327,7 +327,7 @@ abstract class AggregateBroadcast[T](commandName: String) extends Aggregate[T](c
   /**
    * Constructs the broadcast Command for each KeyNode actor.
    */
-  override def begin: Unit = route(commandName +: broadcastArgs, destination = Some(self), broadcast = true)
+  override def begin(): Unit = route(commandName +: broadcastArgs, destination = Some(self), broadcast = true)
 
 }
 
@@ -337,7 +337,7 @@ abstract class AggregateBroadcast[T](commandName: String) extends Aggregate[T](c
  */
 class AggregatePubSubChannels extends AggregateBroadcast[Iterable[String]]("_CHANNELS") {
   override def broadcastArgs: Seq[String] = Seq(if (args.size == 2) args(1) else "*")
-  override def complete: Iterable[String] = responses.values.reduce(_ ++ _)
+  override def complete(): Iterable[String] = responses.values.reduce(_ ++ _)
 }
 
 /**
@@ -349,12 +349,12 @@ class AggregatePubSubNumSub extends Aggregate[Int]("_NUMSUB") {
   /**
    * First arg is the NUMSUB subcommand, not a key.
    */
-  override def keys: Seq[String] = args.drop(1)
+  override def keys: Seq[String] = args.tail
 
   /**
    * Pair keys with responses.
    */
-  override def complete: Seq[String] = keys.flatMap(x => Seq(x, responses(x).toString))
+  override def complete(): Seq[String] = keys.flatMap(x => Seq(x, responses(x).toString))
 
 }
 
@@ -370,7 +370,7 @@ abstract class BaseAggregateKeys extends AggregateBroadcast[Iterable[String]]("_
  * Aggregate for the KEYS command. Simply combines all keys returned
  */
 class AggregateKeys extends BaseAggregateKeys {
-  override def complete: Iterable[String] = reduced
+  override def complete(): Iterable[String] = reduced
 }
 
 /**
@@ -389,14 +389,14 @@ class AggregateScan extends BaseAggregateKeys {
   /**
    * Applies scan to the keys returned.
    */
-  override def complete: Seq[String] = scan(reduced)
+  override def complete(): Seq[String] = scan(reduced)
 
 }
 
 // TODO: add an internal command for getting size from keynode.
 class AggregateDBSize extends BaseAggregateKeys {
   override def broadcastArgs: Seq[String] = Seq("*")
-  override def complete: Int = reduced.size
+  override def complete(): Int = reduced.size
 }
 
 /**
@@ -405,7 +405,7 @@ class AggregateDBSize extends BaseAggregateKeys {
  * a random one of these.
  */
 class AggregateRandomKey extends AggregateBroadcast[String]("_RANDOMKEY") {
-  override def complete: String = randomItem(responses.values.filter(_ != ""))
+  override def complete(): String = randomItem(responses.values.filter(_ != ""))
 }
 
 /**
@@ -455,7 +455,7 @@ class AggregateDel extends BaseAggregateBool("_DEL") {
   /**
    * Each key that actually belong to a KeyNode will return true.
    */
-  override def complete: Int = trues.size
+  override def complete(): Int = trues.size
 
 }
 
@@ -471,7 +471,7 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
    */
   override def broadcastArgs: Seq[String] = command.argsPaired.map(_._1)
 
-  override def complete: Boolean = {
+  override def complete(): Boolean = {
     if (trues.isEmpty) command.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
     trues.isEmpty
   }
@@ -494,7 +494,7 @@ class AggregateScriptExists extends AggregateBroadcast[Iterable[String]]("_SCRIP
    * bools of the original arg list of SHA1 values mapped to whether
    * they exist or not.
    */
-  override def complete: Seq[Boolean] = {
+  override def complete(): Seq[Boolean] = {
     val exists = responses.values.toSeq.flatten.toSet
     args.map(exists.contains)
   }
@@ -506,7 +506,7 @@ class AggregateScriptExists extends AggregateBroadcast[Iterable[String]]("_SCRIP
  * FLUSHDB/FLUSHALL.
  */
 abstract class AggregateSimpleReply(commandName: String) extends AggregateBroadcast[String](commandName) {
-  override def complete: SimpleReply = SimpleReply()
+  override def complete(): SimpleReply = SimpleReply()
 }
 
 /**
