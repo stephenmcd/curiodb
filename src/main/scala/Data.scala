@@ -41,7 +41,7 @@ class StringNode extends Node[String] {
     case "GETSET"      => val x = value; value = args(0); x
     case "APPEND"      => value += args(0); value
     case "GETRANGE"    => slice(value).mkString
-    case "SETRANGE"    => value.patch(args(0).toInt, args(1), 1)
+    case "SETRANGE"    => value = value.patch(args(0).toInt, args(1), 1); value.size
     case "STRLEN"      => value.size
     case "INCR"        => value = (valueOrZero.toInt + 1).toString; value.toInt
     case "INCRBY"      => value = (valueOrZero.toInt + args(0).toInt).toString; value.toInt
