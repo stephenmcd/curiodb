@@ -12,115 +12,131 @@ import akka.routing.ConsistentHashingRouter.ConsistentHashable
 import com.typesafe.config.ConfigFactory
 import scala.collection.JavaConversions._
 import scala.collection.mutable
-import scala.util.Random
+import scala.util.{Random, Success, Failure, Try}
 
 /**
- * Loads all of the command definitions from commands.conf into a
- * structure (maps of maps of maps) that we can use to query the
- * various bits of behavior for a single command.
+ * Loads all of the command attributes from commands.conf into a
+ * structure (command names mapped to maps of attribute names/values)
+ * that Command instances can use to look up their configured
+ * attributes.
  */
-object Commands {
+object Attributes {
 
   /**
-   * A CommandSet holds all of the commands for a particular node type.
-   * Each key is a command name, mapped to its properties.
+   * Command names mapped to maps of attribute names/values.
    */
-  type CommandSet = mutable.Map[String, mutable.Map[String, String]]
-
-  /**
-   * Node types mapped to CommandSet instances, which we populate from
-   * the commands.conf file.
-   */
-  val commands = mutable.Map[String, CommandSet]()
+  val attributes = mutable.Map[String, mutable.Map[String, String]]()
 
   ConfigFactory.load("commands.conf").getConfig("commands").entrySet.foreach {entry =>
     val parts = entry.getKey.replace("\"", "").split('.')
-    commands.getOrElseUpdate(parts(0), mutable.Map[String, mutable.Map[String, String]]())
-    commands(parts(0)).getOrElseUpdate(parts(1), mutable.Map[String, String]())
-    commands(parts(0))(parts(1))(parts(2)) = entry.getValue.unwrapped.toString
+    val (kind, commandName, attributeName) = (parts(0), parts(1), parts(2))
+    val command = attributes.getOrElseUpdate(commandName, mutable.Map[String, String]("kind" -> kind))
+    command(attributeName) = entry.getValue.unwrapped.toString
   }
 
   /**
-   * Returns the CommandSet for a given command name.
+   * Looks up an attribute for a command.
    */
-  def commandSet(commandName: String): Option[(String, CommandSet)] =
-    commands.find(_._2.contains(commandName))
+  def get(commandName: String, attributeName: String): String =
+    attributes(commandName).getOrElse(attributeName, "")
+
+}
+
+/**
+ * Main payload for a command - stores its name, key, and args, and
+ * contains utility methods for looking up attributes configured via
+ * commands.conf.
+ */
+case class Command(input: Seq[Any] = Seq(), client: Option[ActorRef] = None, db: String = "0") {
 
   /**
-   * Returns the type of node for a given command name.
+   * Command's name. The default state of a command on a Node when it
+   * starts is an empty Command that contains no input. In that case,
+   * we just set name to an empty string, which only requires checking
+   * on attribute lookup.
    */
-  def nodeType(commandName: String): String =
-    commandSet(commandName).map(_._1).getOrElse("")
+  val name = input.headOption.getOrElse("").toString.toUpperCase
 
   /**
-   * Returns an attribute stored for the command.
+   * Command's key. This is always considered to be the second item in
+   * the input, even though it might not strictly be the key of a Node,
+   * such as script sha values, and pubsub channels. Treating these as
+   * keys allows a consistent approach for hashing, as required by
+   * KeyNode routing.
    */
-  def attribute(commandName: String, attributeName: String, default: String): String = {
-    commandSet(commandName).map(_._2) match {
-      case Some(set) => set.getOrElse(commandName, Map[String, String]()).getOrElse(attributeName, default)
-      case None      => default
-    }
+  val key = input.drop(1).headOption.getOrElse("").toString
+
+  /**
+   * Command's arguments, namely all input after the command's name,
+   * and its key when it's a real key for a Node (defined by the
+   * "keyed" attribute).
+   */
+  val args = input.map(_.toString).drop(if (name == "") 0 else if (keyed) 2 else 1)
+
+  /**
+   * Attribute lookup used in all the methods below.
+   */
+  def attribute(attributeName: String): String =
+    if (name == "") "" else Attributes.get(name, attributeName)
+
+  /**
+   * Checks the position of an uppercase arg, since many commands
+   * use keywords within arguments, like the SORT command and
+   * many of the sorted set commands.
+   */
+  def indexOf(arg: String): Int = args.map(_.toUpperCase).indexOf(arg)
+
+  /**
+   * The type of node the command is for, eg string, list, hash, etc.
+   */
+  lazy val kind: String = attribute("kind")
+
+  /**
+   * Does the command write to a Node actor's value.
+   */
+  lazy val writes: Boolean = attribute("writes") == "true" || overwrites
+
+  /**
+   * Is the command able to overwrite an existing Node entirely,
+   * which specifically refers to deleting it if it's of a different
+   * type.
+   */
+  lazy val overwrites: Boolean = attribute("overwrites") == "true"
+
+  /**
+   * Does the command operate on a single key, provided by the next
+   * arg after its name. The default is true since most commands
+   * are modelled this way.
+   */
+  lazy val keyed: Boolean = attribute("keyed") != "false"
+
+  /**
+   * Returns the default value the command should respond with
+   * when its key doesn't exist.
+   */
+  lazy val default: Any = attribute("default") match {
+    case "string" => ""
+    case "ok"     => SimpleReply()
+    case "error"  => ErrorReply("no such key")
+    case "nil"    => null
+    case "zero"   => 0
+    case "neg1"   => -1
+    case "neg2"   => -2
+    case "seq"    => Seq()
+    case "scan"   => Seq("0", "")
+    case "nils"   => args.map(_ => null)
+    case "zeros"  => args.map(_ => 0)
+    case _        => ()
   }
 
   /**
-   * Returns if the command's first arg is a node's key.
+   * Validates that the arguments are in range for the command.
    */
-  def keyed(commandName: String): Boolean =
-    attribute(commandName, "keyed", "true") != "false"
-
-  /**
-   * Returns if the command is considered "keyed" for routing purposes,
-   * but doesn't actually store a value in a Node, eg PubSub channels
-   * and Lua script hashes.
-   */
-  def pseudoKeyed(commandName: String): Boolean =
-    attribute(commandName, "pseudoKeyed", "false") == "true"
-
-  /**
-   * Returns if the command writes its node's value.
-   */
-  def writes(commandName: String): Boolean =
-    attribute(commandName, "writes", "false") == "true" || overwrites(commandName)
-
-  /**
-   * Returns if the command can overwrite an existing node with the
-   * same key, even with a different type.
-   */
-  def overwrites(commandName: String): Boolean =
-    attribute(commandName, "overwrites", "false") == "true"
-
-  /**
-   * Returns the default value for a command that should be given when
-   * the node doesn't exist. Each of the types here are referenced by
-   * the "default" param in the commands.conf file.
-   */
-  def default(commandName: String, args: Seq[String]): Any =
-    attribute(commandName, "default", "none") match {
-      case "string" => ""
-      case "ok"     => SimpleReply()
-      case "error"  => ErrorReply("no such key")
-      case "nil"    => null
-      case "zero"   => 0
-      case "neg1"   => -1
-      case "neg2"   => -2
-      case "seq"    => Seq()
-      case "SCAN"   => Seq("0", "")
-      case "nils"   => args.map(_ => null)
-      case "zeros"  => args.map(_ => 0)
-      case "none"   => ()
+  lazy val argsInRange: Boolean = {
+    val parts: Seq[String] = attribute("args") match {
+      case "" => Seq("0")
+      case x  => x.split('-')
     }
-
-  /**
-   * Returns whether the given args are within range for a command.
-   * Defined in the "args" param in the command.conf file. Can be
-   * a single integer for a fixed number of args, or a range defined
-   * by the format "X-Y" where X is the min number of args allowed,
-   * and Y is the max. Some other forms are supported, such as "many"
-   * which means no real upper limit (actually Int.MaxValue), and
-   * "pairs" which means args are pairs, and should be an even number.
-   */
-  def argsInRange(commandName: String, args: Seq[String]): Boolean = {
-    val parts = attribute(commandName, "args", "0").split('-')
     val pairs = parts(0) == "pairs"
     if (parts.size == 1 && !pairs) {
       args.size == parts(0).toInt
@@ -132,18 +148,18 @@ object Commands {
     }
   }
 
-}
+  /**
+   * Sends a Response (usually the result of a command) back to a
+   * the command's destination (usually a ClientNode sending a
+   * Command).
+   */
+  def respond(response: Any): Unit =
+    if (response != ()) {
+      client.foreach {client => client ! Response(key, response)}
+    }
 
-/**
- * Main payload for a command - stores its name, type, key, args.
- */
-case class Command(input: Seq[Any] = Seq(), db: String = "0", destination: Option[ActorRef] = None) {
-  val name = if (input.size > 0) input(0).toString.toUpperCase else ""
-  val nodeType = if (name != "") Commands.nodeType(name) else ""
-  val key = if (nodeType != "" && input.size > 1 && Commands.keyed(name)) input(1).toString else ""
-  val args = input.drop(if (key == "") 1 else 2).map(_.toString)
-  lazy val argsPaired = (0 to args.size - 2 by 2).map {i => (args(i), args(i + 1))}
-  lazy val argsUpper = args.map(_.toUpperCase)
+  override def toString: String = input.mkString(" ").replace("\n", " ")
+
 }
 
 /**
@@ -163,7 +179,8 @@ case class Response(key: String, value: Any)
  * Actor trait containing behavior for dealing with a Command - it
  * contains a command variable that the class should initially set upon
  * receiving it via the actor's receive method. Used by anything that a
- * Command passes through, such as all Node and Aggregate actors.
+ * Command passes through, such as all ClientNode, KeyNode, Node, and
+ * Aggregate actors.
  */
 trait CommandProcessing extends Actor {
 
@@ -192,10 +209,10 @@ trait CommandProcessing extends Actor {
    */
   type CommandRunner = PartialFunction[String, Any]
 
-  // These are just shortcuts to the current command.
+  /**
+   * Shortcut to the args of the current command.
+   */
   def args: Seq[String] = command.args
-  def argsPaired: Seq[(String, String)] = command.argsPaired
-  def argsUpper: Seq[String] = command.argsUpper
 
   /**
    * Sends an unrouted Command to one or more KeyNode actors, either by
@@ -203,7 +220,7 @@ trait CommandProcessing extends Actor {
    */
   def route(
       input: Seq[Any] = Seq(),
-      destination: Option[ActorRef] = None,
+      client: Option[ActorRef] = None,
       clientCommand: Option[Command] = None,
       broadcast: Boolean = false): Unit = {
 
@@ -211,26 +228,21 @@ trait CommandProcessing extends Actor {
     // in order to first validate it), or constructed here with the
     // given set of Command args, which is the common case for Node
     // actors wanting to trigger commands themselves.
-    val p = clientCommand match {
+    val c = clientCommand match {
       case Some(command) => command
-      case None => Command(input, command.db, destination)
+      case None => Command(input, client, command.db)
     }
 
-    val keys = context.system.actorSelection("/user/keys")
-
-    if (broadcast) keys ! Broadcast(p) else keys ! Routable(p)
+    if (c.kind == "client") {
+      // For client commands, just send the command back to the
+      // ClientNode actor.
+      self ! c
+    } else {
+      val keys = context.system.actorSelection("/user/keys")
+      keys ! (if (broadcast) Broadcast(c) else Routable(c))
+    }
 
   }
-
-  /**
-   * Sends a Response (usually the result of a command) back to a
-   * the command's destination (usually a ClientNode sending a
-   * Command).
-   */
-  def respond(response: Any): Unit =
-    if (response != ()) {
-      command.destination.foreach {d => d ! Response(command.key, response)}
-    }
 
   /**
    * Stops the actor - we define this shortcut to give subclassing traits
@@ -314,10 +326,11 @@ trait CommandProcessing extends Actor {
 
 }
 
-// Following are some reply classes that get sent from a Node back
-// to a ClientNode, in response to a Command - they're defined so
-// that we can handle them explicitly when building a response
-// in the Redis protocol, where they have specific notation.
+// Following are some reply classes that get sent from a Node back to a
+// ClientNode, in response to a Command - they're defined so that we
+// can handle them explicitly when building a response in the different
+// ClientNode subclasses - for example the Redis protocol, where errors
+// have specific notation.
 
 /**
  * An error response, as per Redis protocol.

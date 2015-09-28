@@ -138,10 +138,11 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
     case Sleep      => stop()
     case c: Command =>
       command = c
-      respond(Try(run(command.name)) match {
-        case Success(response) => if (Commands.writes(command.name)) save(); response
+      val response = Try(run(command.name)) match {
+        case Success(response) => if (command.writes) save(); response
         case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply("Unknown error")
-      })
+      }
+      command.respond(response)
   }
 
   override def receive: Receive = LoggingReceive(super.receive)
@@ -171,11 +172,11 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    */
   def sort(values: Iterable[String]): Any = {
     // TODO: BY/GET support.
-    var sorted = if (argsUpper.contains("ALPHA")) values.toSeq.sorted else values.toSeq.sortBy(_.toFloat)
-    if (argsUpper.contains("DESC")) sorted = sorted.reverse
-    val limit = argsUpper.indexOf("LIMIT")
+    var sorted = if (command.indexOf("ALPHA") > -1) values.toSeq.sorted else values.toSeq.sortBy(_.toFloat)
+    if (command.indexOf("DESC") > -1) sorted = sorted.reverse
+    val limit = command.indexOf("LIMIT")
     if (limit > -1) sorted = sorted.slice(args(limit + 1).toInt, args(limit + 2).toInt)
-    val store = argsUpper.indexOf("STORE")
+    val store = command.indexOf("STORE")
     if (store > -1) {
       route(Seq("_LSTORE", args(store + 1)) ++ sorted)
       sorted.size
@@ -223,7 +224,7 @@ case object Sleep extends ControlMessage
  */
 @SerialVersionUID(1L)
 class NodeEntry(
-    val nodeType: String,
+    val kind: String,
     @transient var node: Option[ActorRef] = None,
     @transient var expiry: Option[(Long, Cancellable)] = None,
     @transient var sleep: Option[Cancellable] = None)
@@ -372,10 +373,10 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   def sort(): Any = {
     val entry = db()(command.key)
-    entry.nodeType match {
+    entry.kind match {
       case "list" | "set" | "sortedset" =>
         val sortArgs = Seq("_SORT", command.key) ++ command.args
-        entry.node.get ! Command(sortArgs, db = command.db, destination = command.destination)
+        entry.node.get ! Command(sortArgs, db = command.db, client = command.client)
       case _ => wrongType
     }
   }
@@ -392,12 +393,12 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   def validate: Option[Any] = {
     val exists      = db().contains(command.key)
-    val nodeType    = if (exists) db()(command.key).nodeType else ""
-    val invalidType = (nodeType != "" && command.nodeType != nodeType &&
-      command.nodeType != "keys" && !Commands.overwrites(command.name))
+    val kind    = if (exists) db()(command.key).kind else ""
+    val invalidType = (kind != "" && command.kind != kind &&
+      command.kind != "keys" && !command.overwrites)
     val mustExist   = command.name == "LPUSHX" || command.name == "RPUSHX"
     val cantExist   = command.name == "SETNX"
-    val default     = Commands.default(command.name, command.args)
+    val default     = command.default
     if (invalidType)
       Some(wrongType)
     else if ((exists && cantExist) || (!exists && mustExist) || (!exists && !cantExist && default != ()))
@@ -411,12 +412,12 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * Creates a new actor if the key is sleeping or doesn't exist.
    */
   def node: ActorRef = {
-    if (command.nodeType == "keys")
+    if (command.kind == "keys")
       self
     else
       db().get(command.key).flatMap(_.node) match {
         case Some(node) => node
-        case None => create(command.db, command.key, command.nodeType).get
+        case None => create(command.db, command.key, command.kind).get
       }
   }
 
@@ -426,8 +427,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * and restores its keyspace from disk, otherwise (the default)
    * we persists the keyspace to disk.
    */
-  def create(dbName: String, key: String, nodeType: String, recovery: Boolean = false): Option[ActorRef] = {
-    val node = if (recovery && sleepAfter > 0) None else Some(context.actorOf(nodeType match {
+  def create(dbName: String, key: String, kind: String, recovery: Boolean = false): Option[ActorRef] = {
+    val node = if (recovery && sleepAfter > 0) None else Some(context.actorOf(kind match {
       case "string"      => Props[StringNode]
       case "bitmap"      => Props[BitmapNode]
       case "hyperloglog" => Props[HyperLogLogNode]
@@ -435,8 +436,8 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
       case "list"        => Props[ListNode]
       case "set"         => Props[SetNode]
       case "sortedset"   => Props[SortedSetNode]
-    }, s"$dbName-$nodeType-$key"))
-    db(dbName)(key) = new NodeEntry(nodeType, node)
+    }, s"$dbName-$kind-$key"))
+    db(dbName)(key) = new NodeEntry(kind, node)
     if (!recovery) save()
     node
   }
@@ -463,7 +464,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "PEXPIRE"       => expire(System.currentTimeMillis + args(0).toInt)
     case "EXPIREAT"      => expire(args(0).toLong / 1000)
     case "PEXPIREAT"     => expire(args(0).toLong)
-    case "TYPE"          => if (db().contains(command.key)) db()(command.key).nodeType else null
+    case "TYPE"          => if (db().contains(command.key)) db()(command.key).kind else null
     case "RENAMENX"      => val x = db().contains(command.key); if (x) {run("RENAME")}; x
     case "RENAME"        => db()(command.key).node.foreach(_ ! Command(Seq("_RENAME", command.key, args(0)), db = command.db)); SimpleReply()
     case "PERSIST"       => persist()
@@ -477,12 +478,12 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   override def receiveCommand: Receive = ({
     case Routable(p) => command = p; validate match {
-      case Some(errorOrDefault) => respond(errorOrDefault)
+      case Some(errorOrDefault) => command.respond(errorOrDefault)
       case None =>
-        val overwrite = !db().get(command.key).filter(_.nodeType != command.nodeType).isEmpty
-        if (Commands.overwrites(command.name) && overwrite) delete(command.key)
+        val overwrite = !db().get(command.key).filter(_.kind != command.kind).isEmpty
+        if (command.overwrites && overwrite) delete(command.key)
         node ! command
-        if (Commands.keyed(command.name) && !Commands.pseudoKeyed(command.name)) {
+        if (command.keyed) {
           if (sleepAfter > 0) sleep()
           if (expireAfter > 0) expire(System.currentTimeMillis + expireAfter)
         }
@@ -496,7 +497,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
   override def receiveRecover: Receive = {
     case SnapshotOffer(_, snapshot) =>
       snapshot.asInstanceOf[mutable.Map[String, DB]].foreach {case (dbName, entries) =>
-        entries.foreach {case (key, entry) => create(dbName, key, entry.nodeType, recovery = true)}
+        entries.foreach {case (key, entry) => create(dbName, key, entry.kind, recovery = true)}
       }
   }
 
@@ -553,12 +554,11 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * and the number of arguments fall within the configured range.
    */
   def validate: Option[ErrorReply] = {
-    if (command.nodeType == "")
+    if (command.kind == "")
       Some(ErrorReply(s"unknown command '${command.name}'"))
     else if (disabled.contains(command.name))
       Some(ErrorReply(s"command '${command.name}' is disabled"))
-    else if ((command.key == "" && Commands.keyed(command.name))
-        || !Commands.argsInRange(command.name, command.args))
+    else if ((command.key == "" && command.keyed) || !command.argsInRange)
       Some(ErrorReply(s"wrong number of arguments for '${command.name}' command"))
     else
       None
@@ -570,17 +570,19 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * the case of client commands.
    */
   def sendCommand(input: Seq[String]): Unit = {
-    command = Command(input, db = db, destination = Some(self))
+    command = Command(input, db = db, client = Some(self))
     client = Some(sender())
     validate match {
       case Some(error) => respond(error)
-      case None =>
-        if (command.nodeType == "client")
-          self ! command
-        else
-          route(clientCommand = Option(command))
+      case None        => route(clientCommand = Option(command))
     }
   }
+
+  /**
+   * Sends a final response back to the original actor that provided the
+   * input for the Command.
+   */
+  def respond(response: Any): Unit = client.get ! formatResponse(response)
 
   /**
    * Hook for subclasses to override and convert a response value
@@ -594,7 +596,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * input for the Command.
    */
   override def receiveCommand: Receive = ({
-    case response: Response => client.get ! formatResponse(response.value)
+    case response: Response => respond(response.value)
   }: Receive) orElse receivePubSub orElse super.receiveCommand
 
 }

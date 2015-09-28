@@ -148,7 +148,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
     case "HDEL"         => val x = run("HEXISTS"); value -= args(0); x
     case "HLEN"         => value.size
     case "HMGET"        => args.map(value.get(_))
-    case "HMSET"        => argsPaired.foreach {args => value(args._1) = args._2}; SimpleReply()
+    case "HMSET"        => args.grouped(2).foreach {pair => value(pair(0)) = pair(1)}; SimpleReply()
     case "HINCRBY"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
     case "HINCRBYFLOAT" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
     case "HSET"         => val x = !value.contains(args(0)); set(args(1)); x
@@ -188,7 +188,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
       blocked += command
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= command
-        respond(null)
+        command.respond(null)
       }
       ()
     } else run(command.name.tail)  // Run the non-blocking version.
@@ -205,7 +205,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
       // that the run method has access to the correct Command.
       command = blocked.head
       blocked -= command
-      respond(run(command.name.tail))
+      command.respond(run(command.name.tail))
     }
     result
   }
@@ -399,7 +399,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
     if (from.score > to.score) return Seq()
     var result = scores.subSet(from, true, to, true).toSeq
     result = limit[SortedSetEntry](if (reverse) result.reverse else result)
-    if (argsUpper.contains("WITHSCORES"))
+    if (command.indexOf("WITHSCORES") > -1)
       result.flatMap(x => Seq(x.key, numberToString(x.score)))
     else
       result.map(_.key)
@@ -453,7 +453,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
    * Optionally handles the LIMIT arg in range commands.
    */
   def limit[T](values: Seq[T]): Seq[T] = {
-    val i = argsUpper.indexOf("LIMIT")
+    val i = command.indexOf("LIMIT")
     if (i > 1)
       values.slice(args(i + 1).toInt, args(i + 1).toInt + args(i + 2).toInt)
     else
@@ -465,7 +465,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
     case "_ZSTORE"          => keys.clear; scores.clear; run("ZADD")
     case "_ZGET"            => keys
     case "_SORT"            => sort(keys.keys)
-    case "ZADD"             => argsPaired.map(arg => add(arg._1.toFloat, arg._2)).filter(x => x).size
+    case "ZADD"             => args.grouped(2).map(pair => add(pair(0).toFloat, pair(1))).filter(x => x).size
     case "ZCARD"            => keys.size
     case "ZCOUNT"           => rangeByScore(args(0), args(1)).size
     case "ZINCRBY"          => increment(args(0).toFloat, args(1))

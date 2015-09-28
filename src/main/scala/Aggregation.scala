@@ -31,7 +31,7 @@ trait AggregateCommands extends CommandProcessing {
    * CommandRunner methods to form its own.
    */
   def runAggregate: CommandRunner = {
-    case "MSET"         => argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}; SimpleReply()
+    case "MSET"         => args.grouped(2).foreach {args => route("SET" +: args)}; SimpleReply()
     case "MSETNX"       => aggregate(Props[AggregateMSetNX])
     case "MGET"         => aggregate(Props[AggregateMGet])
     case "BITOP"        => aggregate(Props[AggregateBitOp])
@@ -115,7 +115,7 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    * the Aggregate subclass instance's command, for each key in the
    * originating Command.
    */
-  def begin() = keys.foreach {key => route(Seq(commandName, key), destination = Some(self))}
+  def begin() = keys.foreach {key => route(Seq(commandName, key), client = Some(self))}
 
   /**
    * Starts the aggregation process when the original Command is first
@@ -130,11 +130,11 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
       val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
       responses(keyOrIndex) = value.asInstanceOf[T]
       if (responses.size == keys.size) {
-        respond(Try(complete()) match {
+        command.respond(Try(complete()) match {
           case Success(response) => response
           case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply
         })
-        stop
+        stop()
       }
   }
 
@@ -186,8 +186,15 @@ class AggregateSet extends BaseAggregateSet {
  * Node being written to.
  */
 class AggregateSetStore extends BaseAggregateSet {
+
+  /**
+   * First arg is the key being written to.
+   */
+  override def keys: Seq[String] = super.keys.tail
+
   override def complete(): Unit =
-    route(Seq("_SSTORE", command.key) ++ ordered.reduce(reducer), destination = command.destination)
+    route(Seq("_SSTORE", args.head) ++ ordered.reduce(reducer), client = command.client)
+
 }
 
 /**
@@ -201,17 +208,17 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
   /**
    * Position of the AGGREGATE arg in the original Command.
    */
-  lazy val aggregatePos = argsUpper.indexOf("AGGREGATE")
+  lazy val aggregatePos = command.indexOf("AGGREGATE")
 
   /**
    * Value of the AGGREGATE arg in the original Command.
    */
-  lazy val aggregateName = if (aggregatePos == -1) "SUM" else argsUpper(aggregatePos + 1)
+  lazy val aggregateName = if (aggregatePos == -1) "SUM" else args(aggregatePos + 1).toUpperCase
 
   /**
    * Postition of the WEIGHT arg in the original Command.
    */
-  lazy val weightPos = argsUpper.indexOf("WEIGHTS")
+  lazy val weightPos = command.indexOf("WEIGHTS")
 
   /**
    * The actual operation that will be performed given the AGGREGATE
@@ -256,7 +263,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
       i += 1
       out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
-    route(Seq("_ZSTORE", command.key) ++ result, destination = command.destination)
+    route(Seq("_ZSTORE", command.key) ++ result, client = command.client)
   }
 
 }
@@ -278,7 +285,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
         val to = ordered(0).lastOption.getOrElse(1) - 1
         mutable.BitSet(from until to: _*) ^ ordered(0)
     }
-    route(Seq("_BSTORE", args(1)) ++ result, destination = command.destination)
+    route(Seq("_BSTORE", args(1)) ++ result, client = command.client)
   }
 }
 
@@ -297,7 +304,7 @@ class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
 class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
   override def complete(): Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
-    route(Seq("_PFSTORE", command.key) ++ result, destination = command.destination)
+    route(Seq("_PFSTORE", command.key) ++ result, client = command.client)
   }
 }
 
@@ -327,7 +334,7 @@ abstract class AggregateBroadcast[T](commandName: String) extends Aggregate[T](c
   /**
    * Constructs the broadcast Command for each KeyNode actor.
    */
-  override def begin(): Unit = route(commandName +: broadcastArgs, destination = Some(self), broadcast = true)
+  override def begin(): Unit = route(commandName +: broadcastArgs, client = Some(self), broadcast = true)
 
 }
 
@@ -469,10 +476,10 @@ class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
   /**
    * Every odd arg is a key, and every even arg is a value.
    */
-  override def broadcastArgs: Seq[String] = command.argsPaired.map(_._1)
+  override def broadcastArgs: Seq[String] = command.args.grouped(2).map(_(0)).toSeq
 
   override def complete(): Boolean = {
-    if (trues.isEmpty) command.argsPaired.foreach {args => route(Seq("SET", args._1, args._2))}
+    if (trues.isEmpty) command.args.grouped(2).foreach {pair => route(Seq("SET", pair(0), pair(1)))}
     trues.isEmpty
   }
 

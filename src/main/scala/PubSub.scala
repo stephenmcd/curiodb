@@ -52,7 +52,7 @@ trait PubSubServer extends CommandProcessing {
     val pattern = command.name.startsWith("_p")
     val subscriptions = if (pattern) patterns else channels
     val key = if (pattern) args(0) else command.key
-    val subscriber = command.destination.get
+    val subscriber = command.client.get
     val subscribing = command.name.drop(if (pattern) 2 else 1) == "SUBSCRIBE"
     val updated = if (subscribing)
       subscriptions.getOrElseUpdate(key, mutable.Set[ActorRef]()).add(subscriber)
@@ -119,7 +119,7 @@ trait PubSubClient extends CommandProcessing {
     val pattern = command.name.head == 'p'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
-    xs.foreach {x => route(Seq("_" + command.name, x), destination = command.destination, broadcast = pattern)}
+    xs.foreach {x => route(Seq("_" + command.name, x), client = command.client, broadcast = pattern)}
   }
 
   /**
@@ -128,8 +128,8 @@ trait PubSubClient extends CommandProcessing {
    * our channels and patterns that we're unsubscribing.
    */
   override def stop(): Unit = {
-    channels.foreach {x => route(Seq("_UNSUBSCRIBE", x), destination = Some(self))}
-    patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), destination = Some(self), broadcast = true)}
+    channels.foreach {x => route(Seq("_UNSUBSCRIBE", x), client = Some(self))}
+    patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), client = Some(self), broadcast = true)}
     super.stop()
   }
 
@@ -146,7 +146,7 @@ trait PubSubClient extends CommandProcessing {
     case "PUBSUB"       => args(0).toUpperCase match {
       case "CHANNELS" => aggregate(Props[AggregatePubSubChannels])
       case "NUMSUB"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
-      case "NUMPAT"   => route(Seq("_NUMPAT", randomString()), destination = command.destination)
+      case "NUMPAT"   => route(Seq("_NUMPAT", randomString()), client = command.client)
     }
   }
 

@@ -84,7 +84,7 @@ class LuaClientNode extends ClientNode {
 
   override def receiveCommand: Receive = ({
     case CallArgs(args)     => sendCommand(args)
-    case response: Response => client.get ! response; stop
+    case response: Response => client.get ! response; stop()
   }: Receive) orElse super.receiveCommand
 
 }
@@ -188,12 +188,9 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       globals.get("table").set("getn", new TableGetnFunction())
 
       // Add the KEYS/ARGV Lua variables.
-      val offset = if (command.name == "EVAL") 2 else 1
-      val keyCount = if (offset <= args.size) args(offset - 1).toInt else 0
-      val keys = args.slice(offset, offset + keyCount)
-      val argv = args.slice(offset + keyCount, args.size)
+      val keys = args.slice(2, 2 + args(1).toInt)
       globals.set("KEYS", Coerce.toLua(keys))
-      globals.set("ARGV", Coerce.toLua(argv))
+      globals.set("ARGV", Coerce.toLua(args.slice(keys.size + 2, args.size)))
 
       // Add the API. We add it to both the "redis" and "curiodb" names.
       val api = LuaValue.tableOf()
@@ -210,11 +207,11 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       globals.set("redis", api)
 
       // Run the script and return its result back to the ClientNode.
-      respond(Try((new LuaClosure(compiled, globals)).call()) match {
+      command.respond(Try((new LuaClosure(compiled, globals)).call()) match {
         case Success(result) => Coerce.fromLua(result)
         case Failure(e)      => log.debug("Lua runtime error", e.getMessage); ErrorReply(e.getMessage)
       })
-      stop
+      stop()
 
   }
 
@@ -239,8 +236,8 @@ trait Scripting extends CommandProcessing with ActorLogging {
    * function when successful - storing it in the case of LOAD SCRIPT
    * on a KeyNode, or running it in the case of EVAL on a CLientNode.
    */
-  def compileScript(onSuccess: LuaScript => Any): Any =
-    Try(LuaC.instance.compile(new ByteArrayInputStream((args(0)).getBytes), "")) match {
+  def compileScript(uncompiled: String, onSuccess: LuaScript => Any): Any =
+    Try(LuaC.instance.compile(new ByteArrayInputStream(uncompiled.getBytes), "")) match {
       case Success(compiled) => onSuccess(compiled)
       case Failure(e)        =>
         log.debug("Lua compile error", e.getMessage)
@@ -270,7 +267,7 @@ trait ScriptingServer extends Scripting {
   def runScripting: CommandRunner = {
     case "_SCRIPTEXISTS" => args.filter(scripts.contains)
     case "_SCRIPTFLUSH"  => scripts.clear
-    case "_SCRIPTLOAD"   => compileScript {compiled => scripts(command.key) = compiled; command.key}
+    case "_SCRIPTLOAD"   => compileScript(args(1), {compiled => scripts(command.key) = compiled; command.key})
     case "EVALSHA"       =>
       scripts.get(command.key) match {
         case Some(compiled) => runScript(compiled)
@@ -301,12 +298,12 @@ trait ScriptingClient extends Scripting {
    * CommandRunner methods to form its own.
    */
   def runScripting: CommandRunner = {
-    case "EVAL"     => compileScript {compiled => runScript(compiled)}
+    case "EVAL"     => compileScript(args(0), {compiled => runScript(compiled)})
     case "SCRIPT"   =>
       args(0).toUpperCase match {
         case "EXISTS" => aggregate(Props[AggregateScriptExists])
         case "FLUSH"  => route(Seq("_SCRIPTFLUSH"), broadcast = true); SimpleReply()
-        case "LOAD"   => route(Seq("_SCRIPTLOAD", sha1, args(1)), destination = command.destination)
+        case "LOAD"   => route(Seq("_SCRIPTLOAD", sha1, args(1)), client = command.client)
       }
   }
 
