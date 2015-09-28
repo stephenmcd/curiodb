@@ -90,6 +90,16 @@ abstract class JsonClientNode extends ClientNode {
 class HttpClientNode extends JsonClientNode {
 
   /**
+   * Flag marking the client as in chunked mode for PubSub.
+   */
+  var chunked: Boolean = false
+
+  /**
+   * Flag marking chunked mode for PubSub has started.
+   */
+  var chunkedStarted: Boolean = false
+
+  /**
    * Shortcut for a 400 HttpResponse with an error message.
    */
   def errorResponse(entity: String): HttpResponse =
@@ -111,35 +121,25 @@ class HttpClientNode extends JsonClientNode {
 
     case HttpRequest(HttpMethods.POST, Uri.Path("/"), _, entity, _) =>
       fromJson(entity.asString) match {
-        case Some(input) => sendCommand(input); if (command.name.endsWith("SUBSCRIBE")) context.become(chunked)
+        case Some(input) => sendCommand(input); if (command.name.endsWith("SUBSCRIBE")) chunked = true
         case None        => sender() ! errorResponse(MISSING_ARG)
       }
 
     // Fallback for any other HttpRequest, just return 404.
     case _: HttpRequest => sender() ! HttpResponse(status = StatusCodes.NotFound)
 
-    case Response(_, response) =>
-      client.get ! (response match {
-        case ErrorReply(msg, _) => errorResponse(msg)
-        case _                  => jsonResponse(jsonResult(response))
-      })
-
   }: Receive) orElse super.receiveCommand
 
   /**
-   * Receive handler for PubSub messages - the first response received
-   * starts chunked messages with ChunkedResponseStart, and subsequent
-   * messages then use MessageChunk. These states fall back to
-   * receiveCommand to retain "Http.ConnectionClosed => stop" for
-   * PubSub cleanup.
+   * Handles the various types of responses that can be returned, eg
+   * HTTP 200/400, and chunked start/message for PubSub.
    */
-  def chunked: Receive = ({
-    case Response(_, response) =>
-      client.get ! ChunkedResponseStart(jsonResponse(jsonResult(response)))
-      context.become(({
-        case Response(_, response) => client.get ! MessageChunk(jsonResult(response))
-      }: Receive) orElse receiveCommand)
-  }: Receive) orElse receiveCommand
+  override def formatResponse(response: Any): Any = response match {
+    case ErrorReply(msg, _)                => errorResponse(msg)
+    case _ if (chunked && !chunkedStarted) => chunkedStarted = true; ChunkedResponseStart(jsonResponse(jsonResult(response)))
+    case _ if (chunked)                    => MessageChunk(jsonResult(response))
+    case _                                 => jsonResponse(jsonResult(response))
+  }
 
 }
 
@@ -171,24 +171,24 @@ class WebSocketClientNode(val serverConnection: ActorRef) extends JsonClientNode
   override def receive: Receive = handshaking orElse businessLogic
 
   /**
-   * Main Receive method - handles incoming and outgoing TextFrame
-   * payloads, which all use JSON strings.
+   * Main Receive method - handles incoming TextFrame payloads, which
+   * all use JSON strings.
    */
   override def businessLogic: Receive = ({
-
     case TextFrame(data) =>
       fromJson(data.decodeString("UTF-8")) match {
         case Some(input) => sendCommand(input)
         case None        => sender() ! errorResult(MISSING_ARG)
       }
-
-    case Response(_, response) =>
-      client.get ! TextFrame(response match {
-        case ErrorReply(msg, _) => errorResult(msg)
-        case _                  => jsonResult(response)
-      })
-
   }: Receive) orElse receiveCommand
+
+  /**
+   * Converts responses to JSON embedded in TextFrame payloads.
+   */
+  override def formatResponse(response: Any): Any = TextFrame(response match {
+    case ErrorReply(msg, _) => errorResult(msg)
+    case _                  => jsonResult(response)
+  })
 
 }
 
@@ -261,24 +261,9 @@ class TcpClientNode extends ClientNode {
   }
 
   /**
-   * Converts a response for a command into a Redis protocol string.
-   */
-  def toRedis(response: Any): String = response match {
-    case x: Iterable[Any]        => s"*${x.size}${end}${x.map(toRedis).mkString}"
-    case x: Boolean              => toRedis(if (x) 1 else 0)
-    case x: Int                  => s":$x$end"
-    case ErrorReply(msg, prefix) => s"-$prefix $msg$end"
-    case SimpleReply(msg)        => s"+$msg$end"
-    case null                    => s"$$-1$end"
-    case x                       => s"$$${x.toString.size}$end$x$end"
-  }
-
-  /**
    * Handles buffering incoming TCP data until a complete Redis
    * protocol packet has formed, and constructing a Command payload
-   * from it, and receiving the Response payload back for the command,
-   * which it then converts back to the Redis protocol and sends it
-   * back to the client socket.
+   * from it.
    */
   override def receiveCommand: Receive = ({
 
@@ -291,9 +276,23 @@ class TcpClientNode extends ClientNode {
     // Triggers cleanup for PubSub etc.
     case Tcp.PeerClosed => stop
 
-    case Response(_, response) => client.get ! Tcp.Write(ByteString(toRedis(response)))
-
   }: Receive) orElse super.receiveCommand
+
+  /**
+   * Converts a response for a command into a Redis protocol string.
+   */
+  override def formatResponse(response: Any): Any = {
+    def toRedis(response: Any): String = response match {
+      case x: Iterable[Any]        => s"*${x.size}${end}${x.map(toRedis).mkString}"
+      case x: Boolean              => toRedis(if (x) 1 else 0)
+      case x: Int                  => s":$x$end"
+      case ErrorReply(msg, prefix) => s"-$prefix $msg$end"
+      case SimpleReply(msg)        => s"+$msg$end"
+      case null                    => s"$$-1$end"
+      case x                       => s"$$${x.toString.size}$end$x$end"
+    }
+    Tcp.Write(ByteString(toRedis(response)))
+  }
 
 }
 

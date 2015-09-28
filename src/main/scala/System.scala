@@ -582,6 +582,19 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
     }
   }
 
-  override def receiveCommand: Receive = receivePubSub orElse super.receiveCommand
+  /**
+   * Hook for subclasses to override and convert a response value
+   * into an appropriate format.
+   */
+  def formatResponse(response: Any): Any = response
+
+  /**
+   * Receives final Response, which is then formatted per ClientNode
+   * subclass, and sent back to the original actor that provided the
+   * input for the Command.
+   */
+  override def receiveCommand: Receive = ({
+    case response: Response => client.get ! formatResponse(response.value)
+  }: Receive) orElse receivePubSub orElse super.receiveCommand
 
 }
