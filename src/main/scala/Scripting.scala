@@ -188,9 +188,8 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       globals.get("table").set("getn", new TableGetnFunction())
 
       // Add the KEYS/ARGV Lua variables.
-      val keys = args.slice(2, 2 + args(1).toInt)
-      globals.set("KEYS", Coerce.toLua(keys))
-      globals.set("ARGV", Coerce.toLua(args.slice(keys.size + 2, args.size)))
+      globals.set("KEYS", Coerce.toLua(command.keys))
+      globals.set("ARGV", Coerce.toLua(args.slice(command.keys.size + 2, args.size)))
 
       // Add the API. We add it to both the "redis" and "curiodb" names.
       val api = LuaValue.tableOf()

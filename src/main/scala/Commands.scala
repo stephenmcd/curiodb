@@ -108,7 +108,24 @@ case class Command(input: Seq[Any] = Seq(), client: Option[ActorRef] = None, db:
    * arg after its name. The default is true since most commands
    * are modelled this way.
    */
-  lazy val keyed: Boolean = attribute("keyed") != "false"
+  lazy val keyed: Boolean = attribute("keys") match {
+    case "script" | "none" | "args" | "bitop" | "odds" => false
+    case _ => true
+  }
+
+  /**
+   * Returns all arguments in a command that represent keys.
+   */
+  lazy val keys: Seq[String] = attribute("keys") match {
+    case "arg"    => Seq(key + args(0))
+    case "args"   => args
+    case "odds"   => args.grouped(2).map(_(0)).toSeq
+    case "script" => args.slice(2, 2 + args(1).toInt)
+    case "zstore" => args.slice(1, args(0).toInt + 1)
+    case "bitop"  => args.tail
+    case "none"   => Seq()
+    case _        => Seq(key)
+  }
 
   /**
    * Returns the default value the command should respond with

@@ -98,7 +98,7 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    * Ordered set of keys dealt with by the aggregation, defaulting to
    * the original Command args of the command received.
    */
-  def keys: Seq[String] = args
+  def keys: Seq[String] = command.keys
 
   /**
    * Returns responses ordered by their original key order.
@@ -236,13 +236,6 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
   def weight(i: Int): Int = if (weightPos == -1) 1 else args(weightPos + i + 1).toInt
 
   /**
-   * Sorted Set aggregate commands define a required arg that
-   * specifies the number of keys in the Command - here we use
-   * that to pull out the keys.
-   */
-  override def keys: Seq[String] = args.slice(1, args(0).toInt + 1)
-
-  /**
    * Reduces results based on the AGGREGATE/WEIGHT args in the original
    * Command, storing the reduced results in the appropriate Node,
    * and aborting sending a response which will be handled by the final
@@ -274,7 +267,6 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
  * defering the final response to the Node being written to.
  */
 class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
-  override def keys: Seq[String] = args.drop(2)
   override def complete(): Unit = {
     val result = args(0).toUpperCase match {
       case "AND" => ordered.reduce(_ & _)
