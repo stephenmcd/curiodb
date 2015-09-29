@@ -18,7 +18,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
  */
 class StringNode extends Node[String] {
 
-  var value = ""
+  override def emptyValue = ""
 
   /**
    * Returns a default "0" string if the current value is an empty
@@ -60,7 +60,9 @@ class StringNode extends Node[String] {
  */
 class BitmapNode extends Node[mutable.BitSet] {
 
-  var value = mutable.BitSet()
+  override def emptyValue = mutable.BitSet()
+
+  override def cloneValue = value.clone
 
   def last: Int = value.lastOption.getOrElse(0)
 
@@ -97,10 +99,12 @@ class BitmapNode extends Node[mutable.BitSet] {
  */
 class HyperLogLogNode extends Node[HLL] {
 
-  var value = new HLL(
+  override def emptyValue = new HLL(
     context.system.settings.config.getInt("curiodb.hyperloglog.register-log"),
     context.system.settings.config.getInt("curiodb.hyperloglog.register-width")
   )
+
+  override def cloneValue = value.clone
 
   /**
    * The HLL class only supports longs, so we just use hashcodes of the
@@ -127,7 +131,9 @@ class HyperLogLogNode extends Node[HLL] {
  */
 class HashNode extends Node[mutable.Map[String, String]] {
 
-  var value = mutable.Map[String, String]()
+  override def emptyValue = mutable.Map[String, String]()
+
+  override def cloneValue = value.clone
 
   /**
    * Shortcut that sets a value, given that the hash key is the first
@@ -170,7 +176,9 @@ class HashNode extends Node[mutable.Map[String, String]] {
  */
 class ListNode extends Node[mutable.ListBuffer[String]] {
 
-  var value = mutable.ListBuffer[String]()
+  override def emptyValue = mutable.ListBuffer[String]()
+
+  override def cloneValue = value.clone
 
   /**
    * Set of blocked Command instances awaiting a response.
@@ -284,7 +292,9 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
  */
 class SetNode extends Node[mutable.Set[String]] {
 
-  var value = mutable.Set[String]()
+  override def emptyValue = mutable.Set[String]()
+
+  override def cloneValue = value.clone
 
   def run: CommandRunner = {
     case "_RENAME"     => rename(value, "_SSTORE")
@@ -335,7 +345,9 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
    * Actual value is a two item tuple, map of keys to scores, and set
    * of score/key entries.
    */
-  var value = (new IndexedTreeMap[String, Float](), new IndexedTreeSet[SortedSetEntry]())
+  override def emptyValue = (new IndexedTreeMap[String, Float](), new IndexedTreeSet[SortedSetEntry]())
+
+  override def cloneValue = (new IndexedTreeMap[String, Float](value._1), new IndexedTreeSet[SortedSetEntry](value._2))
 
   /**
    * Shortcut to mapping of keys to scores.

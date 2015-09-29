@@ -119,7 +119,8 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    * originating Command.
    */
   def begin() = {
-    commands = keys.map(key => Command(Seq(commandName, key), client = Some(self)))
+    // We don't use copy here, since we need new IDs generated.
+    commands = keys.map(key => Command(Seq(commandName, key), client = Some(self), clientId = command.clientId))
     commands.foreach(command => route(clientCommand = Some(command)))
   }
 
@@ -204,7 +205,7 @@ class AggregateSetStore extends BaseAggregateSet {
   override def keys: Seq[String] = super.keys.tail
 
   override def complete(): Unit =
-    route(Seq("_SSTORE", args.head) ++ ordered.reduce(reducer), client = command.client)
+    route(clientCommand = Some(command.copy(Seq("_SSTORE", args.head) ++ ordered.reduce(reducer))))
 
 }
 
@@ -267,7 +268,7 @@ class AggregateSortedSetStore extends AggregateSetReducer[IndexedTreeMap[String,
       i += 1
       out
     }).entrySet.toSeq.flatMap(e => Seq(e.getValue.toString, e.getKey))
-    route(Seq("_ZSTORE", command.key) ++ result, client = command.client)
+    route(clientCommand = Some(command.copy(Seq("_ZSTORE", command.key) ++ result)))
   }
 
 }
@@ -288,7 +289,7 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
         val to = ordered(0).lastOption.getOrElse(1) - 1
         mutable.BitSet(from until to: _*) ^ ordered(0)
     }
-    route(Seq("_BSTORE", args(1)) ++ result, client = command.client)
+    route(clientCommand = Some(command.copy(Seq("_BSTORE", args(1)) ++ result)))
   }
 }
 
@@ -307,7 +308,7 @@ class AggregateHyperLogLogCount extends Aggregate[Long]("_PFCOUNT") {
 class AggregateHyperLogLogMerge extends Aggregate[HLL]("_PFGET") {
   override def complete(): Unit = {
     val result = ordered.reduce({(x, y) => x.union(y); x}).toBytes.map(_.toString)
-    route(Seq("_PFSTORE", command.key) ++ result, client = command.client)
+    route(clientCommand = Some(command.copy(Seq("_PFSTORE", command.key) ++ result)))
   }
 }
 

@@ -83,8 +83,8 @@ object Coerce {
 class LuaClientNode extends ClientNode {
 
   override def receiveCommand: Receive = ({
-    case CallArgs(args)     => sendCommand(args)
-    case response: Response => client.get ! response; stop()
+    case CallArgs(args, clientId) => sendCommand(args, Some(clientId))
+    case response: Response       => client.get ! response; stop()
   }: Receive) orElse super.receiveCommand
 
 }
@@ -93,7 +93,7 @@ class LuaClientNode extends ClientNode {
  * Args given to pcall/call functions inside a Lua script, that will be
  * used to construct a Command payload from a LuaClientNode actor.
  */
-case class CallArgs(args: Seq[String])
+case class CallArgs(args: Seq[String], clientId: String)
 
 /**
  * Lua API for pcall/call. When called, it takes the args provided,
@@ -104,14 +104,17 @@ case class CallArgs(args: Seq[String])
  * raised (as with call), or a message table containing the error is
  * returned (as with pcall).
  */
-class CallFunction(context: ActorContext, raiseErrors: Boolean = false) extends VarArgFunction {
+class CallFunction(
+    context: ActorContext,
+    clientId: String,
+    raiseErrors: Boolean = false) extends VarArgFunction {
 
   override def invoke(luaArgs: LuaArgs): LuaValue = {
     val args = (for (i <- 1 to luaArgs.narg) yield luaArgs.tojstring(i)).toSeq
     val node = context.actorOf(Props[LuaClientNode])
     val timeout_ = 2 seconds
     implicit val timeout: Timeout = timeout_
-    Await.result(node ? CallArgs(args), timeout_).asInstanceOf[Response].value match {
+    Await.result(node ? CallArgs(args, clientId), timeout_).asInstanceOf[Response].value match {
       case ErrorReply(message, _) if raiseErrors => throw new LuaError(message)
       case result => Coerce.toLua(result)
     }
@@ -193,8 +196,8 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
 
       // Add the API. We add it to both the "redis" and "curiodb" names.
       val api = LuaValue.tableOf()
-      api.set("pcall", new CallFunction(context))
-      api.set("call",  new CallFunction(context, raiseErrors = true))
+      api.set("pcall", new CallFunction(context, command.clientId))
+      api.set("call",  new CallFunction(context, command.clientId, raiseErrors = true))
       api.set("status_reply", new ReplyFunction("ok"))
       api.set("error_reply",  new ReplyFunction("err"))
       api.set("LOG_DEBUG",   Coerce.toLua(LogLevel.Debug))
@@ -259,9 +262,9 @@ trait ScriptingServer extends Scripting {
   lazy val scripts = mutable.Map[String, LuaScript]()
 
   /**
-   * CommandRunner for ScriptingServer, which is given a distinct
-   * name, so that KeyNode can compose together multiple
-   * CommandRunner methods to form its own.
+   * CommandRunner for ScriptingServer, which is given a distinct name,
+   * so that KeyNode can compose together multiple CommandRunner
+   * methods to form its own.
    */
   def runScripting: CommandRunner = {
     case "_SCRIPTEXISTS" => args.filter(scripts.contains)
@@ -286,8 +289,8 @@ trait ScriptingClient extends Scripting {
 
   /**
    * Constructs the SHA1 digest of a given script - this happens on
-   * the ClientNode so that we can leverage the routing normally
-   * used for keys when sending the script to a KeyNode to be stored.
+   * the ClientNode so that we can leverage the routing normally used
+   * for keys when sending the script to a KeyNode to be stored.
    */
   def sha1 = digest.digest(args(1).getBytes).map("%02x".format(_)).mkString
 
@@ -302,7 +305,7 @@ trait ScriptingClient extends Scripting {
       args(0).toUpperCase match {
         case "EXISTS" => aggregate(Props[AggregateScriptExists])
         case "FLUSH"  => route(Seq("_SCRIPTFLUSH"), broadcast = true); SimpleReply()
-        case "LOAD"   => route(Seq("_SCRIPTLOAD", sha1, args(1)), client = command.client)
+        case "LOAD"   => route(clientCommand = Some(command.copy(Seq("_SCRIPTLOAD", sha1, args(1)))))
       }
   }
 

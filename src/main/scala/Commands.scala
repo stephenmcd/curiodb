@@ -51,7 +51,9 @@ case class Command(
     input: Seq[Any] = Seq(),
     client: Option[ActorRef] = None,
     db: String = "0",
-    id: String = Random.alphanumeric.take(5).mkString) {
+    clientId: String = "",
+    id: String = Random.alphanumeric.take(5).mkString,
+    createdInTransaction: Boolean = false) {
 
   /**
    * Command's name. The default state of a command on a Node when it
@@ -251,7 +253,7 @@ trait CommandProcessing extends Actor {
     // actors wanting to trigger commands themselves.
     val c = clientCommand match {
       case Some(command) => command
-      case None => Command(input, client, command.db)
+      case None => Command(input, client, command.db, command.clientId)
     }
 
     if (c.kind == "client") {
@@ -259,8 +261,13 @@ trait CommandProcessing extends Actor {
       // ClientNode actor.
       self ! c
     } else {
+      // We don't specifically need the Routable wrapper when
+      // broadcasting, since the Command will go to all KeyNode actors,
+      // but doing so ensures the Command still goes through the KeyNode
+      // actor's validate method, which is needed for transaction
+      // handling (more specifically, for the "_DEL" command).
       val keys = context.system.actorSelection("/user/keys")
-      keys ! (if (broadcast) Broadcast(c) else Routable(c))
+      keys ! (if (broadcast) Broadcast(Routable(c)) else Routable(c))
     }
 
   }
