@@ -110,6 +110,12 @@ case class Command(
   lazy val overwrites: Boolean = attribute("overwrites") == "true"
 
   /**
+   * The command puts the ClientNode into streaming mode where
+   * timeouts aren't used, specifically PubSub subscription.
+   */
+  lazy val streaming: Boolean = attribute("streaming") == "true"
+
+  /**
    * Does the command operate on a single key, provided by the next
    * arg after its name. The default is true since most commands
    * are modelled this way.
@@ -232,6 +238,8 @@ trait CommandProcessing extends Actor {
    */
   type CommandRunner = PartialFunction[String, Any]
 
+  val commandTimeout = durationSetting("curiodb.timeouts.command")
+
   /**
    * Shortcut to the args of the current command.
    */
@@ -346,6 +354,17 @@ trait CommandProcessing extends Actor {
     val (from, to) = bounds(args(0).toInt, args(1).toInt, value.size)
     value.slice(from, to + 1)
   }
+
+  /**
+   * Retrieves a duration config setting as milliseconds, and handles
+   * the value not being a duration value, so we can do something like
+   * set it to "off", in which case we default to 0.
+   */
+  def durationSetting(name: String): Int =
+    Try(context.system.settings.config.getDuration(name).toMillis.toInt) match {
+      case Success(ms) => ms
+      case Failure(_)  => 0
+    }
 
 }
 

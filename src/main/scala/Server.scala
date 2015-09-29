@@ -70,9 +70,8 @@ abstract class JsonClientNode extends ClientNode {
   def jsonResult(response: Any): String =
     Map("result" -> toJson(response)).toJson.toString + "\n"
 
-  // Triggers cleanup for PubSub etc.
   override def receiveCommand: Receive = ({
-    case _: Http.ConnectionClosed => stop
+    case _: Http.ConnectionClosed => stop()  // Triggers cleanup for PubSub etc.
   }: Receive) orElse super.receiveCommand
 
 }
@@ -274,7 +273,7 @@ class TcpClientNode extends ClientNode {
         sendCommand(parsed.get)
 
     // Triggers cleanup for PubSub etc.
-    case Tcp.PeerClosed => stop
+    case Tcp.PeerClosed => stop()
 
   }: Receive) orElse super.receiveCommand
 

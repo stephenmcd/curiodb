@@ -122,7 +122,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * the transaction does not complete, it can start handling write
    * commands again.
    */
-  val transactionTimeout = durationSetting("curiodb.transaction-timeout")
+  val transactionTimeout = durationSetting("curiodb.timeouts.transaction")
 
   /**
    * Abstract definition of each Node actor's CommandRunner that must
@@ -287,17 +287,6 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
       sorted.size
     } else sorted
   }
-
-  /**
-   * Retrieves a duration config setting as milliseconds, and handles
-   * the value not being a duration value, so we can do something like
-   * set it to "off", in which case we default to 0.
-   */
-  def durationSetting(name: String): Int =
-    Try(context.system.settings.config.getDuration(name).toMillis.toInt) match {
-      case Success(ms) => ms
-      case Failure(_)  => 0
-    }
 
 }
 
@@ -833,6 +822,13 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   var transactionError = false
 
   /**
+   * Flag used to mark the ClientNode as being in "streaming" mode,
+   * namely when a PubSub channel is subscribed to, and command
+   * timeouts should be bypassed.
+   */
+  var streaming = false
+
+  /**
    * Cleanup performed whenever MULTI/EXEC is aborted, either
    * explicitly via DISCARD or implicitly via an error.
    */
@@ -846,6 +842,23 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * Determines if a transaction is triggered via MULTI.
    */
   def multi: Boolean = commands.size > 0 && commands.head._2.name == "MULTI"
+
+  /**
+   * Routes the given Command instance, initializing its timeout event.
+   */
+  def routeCommand(command: Command) = {
+    streaming = command.streaming
+    if (!streaming) {
+      val id = command.id
+      context.system.scheduler.scheduleOnce(commandTimeout milliseconds) {
+        commands.remove(id) match {
+          case Some(c) => respond(ErrorReply(s"Timeout on $c"))
+          case None    =>
+        }
+      }
+    }
+    route(clientCommand = Some(command))
+  }
 
   /**
    * Internal API for subclasses to send a command once they've
@@ -886,7 +899,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
             // Committing a transaction, start the first step.
             awaitTransactionAcks("_MULTI", {
               context.become(awaitTransactionResponses)
-              commands.values.foreach(c => route(clientCommand = Some(c)))
+              commands.values.foreach(routeCommand)
             })
           case _ if multi =>
             // Since SELECT modifies subsequent commands as they're
@@ -897,7 +910,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
             respond(SimpleReply(if (commands.size == 1) "OK" else "QUEUED"))
           case _ =>
             // No transaction, send the command.
-            route(clientCommand = Some(commands.head._2))
+            routeCommand(commands.head._2)
         }
     }
   }
@@ -997,9 +1010,10 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   override def receiveCommand: Receive = ({
     case response: Response =>
-      commands.clear
-      responses.clear
-      respond(response.value)
+      commands.remove(response.id) match {
+        case None if !streaming => log.error(s"Client received response after timeout $response")
+        case _                  => respond(response.value)
+      }
   }: Receive) orElse receivePubSub orElse super.receiveCommand
 
 }

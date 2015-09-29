@@ -107,12 +107,13 @@ case class CallArgs(args: Seq[String], clientId: String)
 class CallFunction(
     context: ActorContext,
     clientId: String,
+    callTimeout: Int,
     raiseErrors: Boolean = false) extends VarArgFunction {
 
   override def invoke(luaArgs: LuaArgs): LuaValue = {
     val args = (for (i <- 1 to luaArgs.narg) yield luaArgs.tojstring(i)).toSeq
     val node = context.actorOf(Props[LuaClientNode])
-    val timeout_ = 2 seconds
+    val timeout_ = callTimeout milliseconds
     implicit val timeout: Timeout = timeout_
     Await.result(node ? CallArgs(args, clientId), timeout_).asInstanceOf[Response].value match {
       case ErrorReply(message, _) if raiseErrors => throw new LuaError(message)
@@ -176,6 +177,15 @@ class TableGetnFunction extends OneArgFunction {
  */
 class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogging {
 
+  /**
+   * Timeout for running "call" in Lua. We need to define it since
+   * we're using ask, but in terms of the whole flow of a transaction
+   * around a Lua script, the real timeout is governed by the duration
+   * configured for command timeouts, so we simply just need a value
+   * higher than that.
+   */
+  val callTimeout = commandTimeout * 2
+
   def receive: Receive = {
     case c: Command =>
       command = c
@@ -196,8 +206,8 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
 
       // Add the API. We add it to both the "redis" and "curiodb" names.
       val api = LuaValue.tableOf()
-      api.set("pcall", new CallFunction(context, command.clientId))
-      api.set("call",  new CallFunction(context, command.clientId, raiseErrors = true))
+      api.set("pcall", new CallFunction(context, command.clientId, callTimeout))
+      api.set("call",  new CallFunction(context, command.clientId, callTimeout, raiseErrors = true))
       api.set("status_reply", new ReplyFunction("ok"))
       api.set("error_reply",  new ReplyFunction("err"))
       api.set("LOG_DEBUG",   Coerce.toLua(LogLevel.Debug))
