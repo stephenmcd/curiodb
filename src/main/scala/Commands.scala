@@ -47,7 +47,11 @@ object Attributes {
  * contains utility methods for looking up attributes configured via
  * commands.conf.
  */
-case class Command(input: Seq[Any] = Seq(), client: Option[ActorRef] = None, db: String = "0") {
+case class Command(
+    input: Seq[Any] = Seq(),
+    client: Option[ActorRef] = None,
+    db: String = "0",
+    id: String = Random.alphanumeric.take(5).mkString) {
 
   /**
    * Command's name. The default state of a command on a Node when it
@@ -141,8 +145,8 @@ case class Command(input: Seq[Any] = Seq(), client: Option[ActorRef] = None, db:
     case "neg2"   => -2
     case "seq"    => Seq()
     case "scan"   => Seq("0", "")
-    case "nils"   => args.map(_ => null)
-    case "zeros"  => args.map(_ => 0)
+    case "nils"   => Seq.fill(args.size)(null)
+    case "zeros"  => Seq.fill(args.size)(0)
     case _        => ()
   }
 
@@ -172,7 +176,7 @@ case class Command(input: Seq[Any] = Seq(), client: Option[ActorRef] = None, db:
    */
   def respond(response: Any): Unit =
     if (response != ()) {
-      client.foreach {client => client ! Response(key, response)}
+      client.foreach {client => client ! Response(response, id)}
     }
 
   override def toString: String = input.mkString(" ").replace("\n", " ")
@@ -190,7 +194,7 @@ case class Routable(command: Command) extends ConsistentHashable {
  * Response a Node will return to a ClientNode after a command is run.
  * Primarily used in CommandProcessing.
  */
-case class Response(key: String, value: Any)
+case class Response(value: Any, id: String)
 
 /**
  * Actor trait containing behavior for dealing with a Command - it
@@ -277,7 +281,7 @@ trait CommandProcessing extends Actor {
    * Shortcut for creating Aggregate actors.
    */
   def aggregate(props: Props): Unit =
-    context.actorOf(props, s"aggregate-${command.name}-${randomString()}") ! command
+    context.actorOf(props, s"aggregate-${command.name}-${command.id}") ! command
 
   /**
    * Utility for selecting a random item.
@@ -294,11 +298,6 @@ trait CommandProcessing extends Actor {
     val s = n.toString
     if (s.takeRight(2) == ".0") s.dropRight(2) else s
   }
-
-  /**
-   * Utility for generating a random string.
-   */
-  def randomString(length: Int = 5): String = Random.alphanumeric.take(length).mkString
 
   /**
    * Utility for glob-style filtering.

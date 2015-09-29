@@ -86,24 +86,27 @@ trait AggregateCommands extends CommandProcessing {
 abstract class Aggregate[T](val commandName: String) extends Actor with CommandProcessing with ActorLogging {
 
   /**
-   * Typically the initial keys mapped to responses sent back from each
-   * Node actor. The keys are used so that we can preserve the original
-   * order of the keys when constructing the final response. In some
-   * cases where keys are not applicable, an integer is used to maintain
-   * order.
+   * Sequence of Command instances that are initially sent when
+   * aggregation begins. These are stored so we can order the
+   * responses received by mapping them back to Command IDs.
+   */
+  var commands = Seq[Command]()
+
+  /**
+   * Responses received mapped to Command IDs.
    */
   var responses = mutable.Map[String, T]()
 
   /**
-   * Ordered set of keys dealt with by the aggregation, defaulting to
-   * the original Command args of the command received.
+   * Ordered set of keys dealt with by the initial Command, used to
+   * construct the list of commands being sent.
    */
   def keys: Seq[String] = command.keys
 
   /**
-   * Returns responses ordered by their original key order.
+   * Returns responses ordered by their original Command order.
    */
-  def ordered: Seq[T] = keys.map(responses(_))
+  def ordered: Seq[T] = commands.map(c => responses(c.id))
 
   /**
    * Constructs the final response to send back to the ClientNode.
@@ -115,7 +118,10 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    * the Aggregate subclass instance's command, for each key in the
    * originating Command.
    */
-  def begin() = keys.foreach {key => route(Seq(commandName, key), client = Some(self))}
+  def begin() = {
+    commands = keys.map(key => Command(Seq(commandName, key), client = Some(self)))
+    commands.foreach(command => route(clientCommand = Some(command)))
+  }
 
   /**
    * Starts the aggregation process when the original Command is first
@@ -126,13 +132,18 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
    */
   def receive: Receive = LoggingReceive {
     case c: Command => command = c; begin()
-    case Response(key, value) =>
-      val keyOrIndex = if (responses.contains(key)) (responses.size + 1).toString else key
-      responses(keyOrIndex) = value.asInstanceOf[T]
+    case Response(value, id) =>
+      // Commands broadcast to all KeyNode actors will all return
+      // responses with the same ID. In this case we don't actually
+      // care about ordering, and just need a unique value as the
+      // key for the responses map, so we just use the (growing) size
+      // of the responses map as a unique integer as the key.
+      val idOrInt = if (responses.contains(id)) (responses.size + 1).toString else id
+      responses(idOrInt) = value.asInstanceOf[T]
       if (responses.size == keys.size) {
         command.respond(Try(complete()) match {
           case Success(response) => response
-          case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply
+          case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply()
         })
         stop()
       }
@@ -353,7 +364,7 @@ class AggregatePubSubNumSub extends Aggregate[Int]("_NUMSUB") {
   /**
    * Pair keys with responses.
    */
-  override def complete(): Seq[String] = keys.flatMap(x => Seq(x, responses(x).toString))
+  override def complete(): Seq[String] = (keys zip ordered).flatMap(x => Seq(x._1, x._2.toString))
 
 }
 

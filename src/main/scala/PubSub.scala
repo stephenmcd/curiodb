@@ -68,11 +68,11 @@ trait PubSubServer extends CommandProcessing {
    */
   def publish(): Int = {
     channels.get(command.key).map({subscribers =>
-      val message = Response(command.key, Seq("message", command.key, args(0)))
+      val message = Response(Seq("message", command.key, args(0)), "")
       subscribers.foreach(_ ! message)
       subscribers.size
     }).sum + patterns.filterKeys(!pattern(Seq(command.key), _).isEmpty).map({entry =>
-      val message = Response(command.key, Seq("pmessage", entry._1, command.key, args(0)))
+      val message = Response(Seq("pmessage", entry._1, command.key, args(0)), "")
       entry._2.foreach(_ ! message)
       entry._2.size
     }).sum
@@ -146,7 +146,7 @@ trait PubSubClient extends CommandProcessing {
     case "PUBSUB"       => args(0).toUpperCase match {
       case "CHANNELS" => aggregate(Props[AggregatePubSubChannels])
       case "NUMSUB"   => if (args.size == 1) Seq() else aggregate(Props[AggregatePubSubNumSub])
-      case "NUMPAT"   => route(Seq("_NUMPAT", randomString()), client = command.client)
+      case "NUMPAT"   => route(Seq("_NUMPAT", command.id), client = command.client)
     }
   }
 
@@ -165,7 +165,7 @@ trait PubSubClient extends CommandProcessing {
       val subscribed = subscribing && subscriptions.add(channelOrPattern)
       val unsubscribed = !subscribing && subscriptions.remove(channelOrPattern)
       if (subscribed || unsubscribed) {
-        self ! Response(channelOrPattern, Seq(event, channelOrPattern, subscriptions.size.toString))
+        self ! Response(Seq(event, channelOrPattern, subscriptions.size.toString), "")
       }
   }
 
