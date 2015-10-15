@@ -52,7 +52,7 @@ case class Command(
     client: Option[ActorRef] = None,
     db: String = "0",
     clientId: String = "",
-    id: String = Random.alphanumeric.take(5).mkString,
+    id: String = Random.alphanumeric.take(10).mkString,
     createdInTransaction: Boolean = false) {
 
   /**
@@ -222,23 +222,27 @@ trait CommandProcessing extends Actor {
   /**
    * Signature for the partial function CommandRunner that actually
    * handles each command. Every Node must implement the "run" method
-   * of this type (this requirement is actually codified in the
-   * base Node class). It takes a case statement mapping command
-   * names to the code that handles them - typically handled
-   * inline, or via a method if more complex. The result will
-   * then be sent back to the calling ClientNode, and converted
-   * into a Redis response before being sent back to the client
-   * socket. One special case is the handler returning Unit,
-   * in which case no response is sent back - in this case it's
-   * up to the handling code to manually send a response back
-   * to the client node. A common example of this is all of the
-   * aggregation commands, which need to coordinate with
+   * of this type (this requirement is actually codified in the base
+   * Node class). It takes a case statement mapping command names to
+   * the code that handles them - typically handled inline, or via a
+   * method if more complex. The result will then be sent back to the
+   * calling ClientNode, and converted into a Redis response before
+   * being sent back to the client socket. One special case is the
+   * handler returning Unit, in which case no response is sent back,
+   * in which case it's up to the handling code to manually send a
+   * response back to the client node. A common example of this is all
+   * of the aggregation commands, which need to coordinate with
    * multiple nodes before calculating a response. But the bulk
    * of commands are simple one-liners directly returning a response.
    */
   type CommandRunner = PartialFunction[String, Any]
 
-  val commandTimeout = durationSetting("curiodb.timeouts.command")
+  /**
+   * Timeout for a single command. Used by ClientNode to schedule
+   * timeout handlers for commands, and also in ScriptRunner to
+   * determine what the timeout for a Lua script should be.
+   */
+  val commandTimeout = durationSetting("curiodb.commands.timeout")
 
   /**
    * Shortcut to the args of the current command.
@@ -283,9 +287,10 @@ trait CommandProcessing extends Actor {
   /**
    * Stops the actor - we define this shortcut to give subclassing traits
    * the chance to override it and inject extra shutdown behavior that
-   * concrete actors need not know about.
+   * concrete actors need not know about. Note we wrap context.stop with
+   * Try here since it may be called twice due to transaction timeouts.
    */
-  def stop(): Unit = context stop self
+  def stop(): Unit = Try(context.stop(self))
 
   // Following are a handful of utility functions - they don't really
   // deal directly with general Command processing, but have some

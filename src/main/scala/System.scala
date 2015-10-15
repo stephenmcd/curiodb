@@ -122,7 +122,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * the transaction does not complete, it can start handling write
    * commands again.
    */
-  val transactionTimeout = durationSetting("curiodb.timeouts.transaction")
+  val transactionTimeout = durationSetting("curiodb.transactions.timeout")
 
   /**
    * Abstract definition of each Node actor's CommandRunner that must
@@ -185,7 +185,15 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
       command = c
       // If the KeyNode for this Node marked the command as creating
       // the Node inside a transaction, set up the transaction.
-      if (command.createdInTransaction) beginTransaction()
+      if (command.createdInTransaction) {
+        beginTransaction()
+        // Remove the main value, as it conceptually shouldn't exist
+        // since this Node doesn't have a committed value yet. More
+        // specifically though, we use the absence of a committed value
+        // as a flag for shutting down the actor if the transaction is
+        // aborted and no committed value exists.
+        values.remove("")
+      }
       val response = Try((run orElse runForAnyNode)(command.name)) match {
         case Success(response) => if (command.writes) save(); response
         case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply("Unknown error")
@@ -214,7 +222,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * so we only move the value if we're still in a transaction.
    */
   def commitTransaction(): Any =
-    closeTransaction(command.clientId) match {
+    closeTransaction(committing = true) match {
       case Some(v) => value = v; TransactionAck()
       case None    => ()
     }
@@ -223,8 +231,18 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * Removes and returns the transaction value. Expected to run twice
    * per transaction - once when commitTransaction is called when
    * _EXEC is received, and once when the transaction times out.
+   * We also check for the lack of a committed value, which indicates
+   * that the actor was created in a transaction
    */
-  def closeTransaction(clientId: String): Option[T] = values.remove(clientId)
+  def closeTransaction(clientId: String = command.clientId, committing: Boolean = false): Option[T] = {
+    val removed = values.remove(clientId)
+    // Transaction was aborted when the Node was created in a
+    // transaction, so shut down. We also check that we're actually
+    // removing the transaction value, since this will run twice and
+    // calling stop twice raises NullPointerExecption in Akka.
+    if (!committing && values.isEmpty) stop()
+    removed
+  }
 
   /**
    * Alternate Receive handler for all Node actors - these are internal
@@ -246,8 +264,9 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * its own timeout.
    */
   def runForAnyNode: CommandRunner = {
-    case "_MULTI" => beginTransaction
-    case "_EXEC"  => commitTransaction
+    case "_MULTI"   => beginTransaction()
+    case "_EXEC"    => commitTransaction()
+    case "_DISCARD" => closeTransaction(); ()
   }
 
   override def receive: Receive = LoggingReceive(super.receive)
@@ -658,7 +677,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * outside of a transaction.
    */
   override def commitTransaction(): Any =
-    closeTransaction(command.clientId) match {
+    closeTransaction(committing = true) match {
       case Some(dbs) =>
         dbs.foreach {case (dbName, entries) =>
           entries.foreach {case (key, entry) =>
@@ -679,15 +698,16 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    * any write commands that were previously stashed due to conflicting
    * with keys in an existing transaction.
    */
-  override def closeTransaction(clientId: String) = {
+  override def closeTransaction(clientId: String = command.clientId, committing: Boolean = false) = {
     if (inTransaction) {
       unstashAll()
       transactionKeys = transactionKeys.filter {case (_, cId) => cId != clientId}
     }
-    super.closeTransaction(clientId)
+    super.closeTransaction(clientId, committing)
   }
 
   override def run: CommandRunner = ({
+    case "_DISCARD"      => forwardTransactionToNodes(); closeTransaction(); ()
     case "_DEL"          => args.map(delete(_))
     case "_KEYS"         => pattern(db().keys, args(0))
     case "_RANDOMKEY"    => randomItem(db().keys)
@@ -821,6 +841,8 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   var transactionError = false
 
+  val transactionAbortOnError = context.system.settings.config.getString("curiodb.transactions.on-error") == "abort"
+
   /**
    * Flag used to mark the ClientNode as being in "streaming" mode,
    * namely when a PubSub channel is subscribed to, and command
@@ -834,6 +856,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   def abortTransaction(response: Any): Unit = {
     transactionError = false
+    responses.clear
     commands.clear
     respond(response)
   }
@@ -848,7 +871,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   def routeCommand(command: Command) = {
     streaming = command.streaming
-    if (!streaming) {
+    if (!streaming && commandTimeout > 0) {
       val id = command.id
       context.system.scheduler.scheduleOnce(commandTimeout milliseconds) {
         commands.remove(id) match {
@@ -954,14 +977,32 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
       // next step.
       onComplete
     } else {
+      val timeout = context.system.scheduler.scheduleOnce(commandTimeout milliseconds) {
+        abortTransaction(ErrorReply(s"Transaction timeout"))
+        context.unbecome
+      }
       var keyCount = keys.size * context.system.settings.config.getInt("curiodb.keynodes")
       context.become({
         case Response(TransactionAck(kc), _) =>
           keyCount -= kc
-          if (keyCount == 0) {context.unbecome; onComplete}
+          if (keyCount == 0) {context.unbecome; timeout.cancel(); onComplete}
       })
       route(commandName +: keys.toSeq, client = Some(self), broadcast = true)
     }
+  }
+
+  /**
+   * Sends the final response once a transaction has ended, which in
+   * the case of MULTI/EXEC, is a sequence of all the collected
+   * responses, ordered by their corresponding commands.
+   */
+  def endTransaction() = {
+    respond(if (multi) {
+      commands.keys.slice(1, commands.size - 1).toSeq.map(responses(_).value)
+    } else responses.values.head.value)
+    commands.clear
+    responses.clear
+    context.become(receiveCommand)
   }
 
   /**
@@ -969,26 +1010,29 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * Response messages for queued commands - once they're all received,
    * we construct the final response, switch state back to the default
    * receiveCommand, and send the final response back to self to be
-   * received as a regular Response.
+   * received as a regular Response. Here we also check for error
+   * replies if we're configured to abort transactions on errors, and
+   * if any are received, we abort the transaction with _DISCARD, and
+   * set all responses other than the error to null, so that clients
+   * can determine which command caused the error.
    */
   def awaitTransactionResponses(): Receive = ({
+    case response @ Response(_: ErrorReply, _) if transactionAbortOnError =>
+      val keys = commands.values.flatMap(_.keys).toSet
+      route("_DISCARD" +: keys.toSeq, broadcast = true)
+      // Set all responses to null, and then put the error response
+      // against its ID - this way when the sequence of ordered
+      // responses is sent back as one response, clients can determine
+      // which command caused the error.
+      commands.keys.foreach(id => responses(id) = Response(null, id))
+      responses(response.id) = response
+      endTransaction()
     case response: Response =>
       responses(response.id) = response
       // We've received all responses when there's the same number as
       // commands, omitting MULTI and EXEC.
-      if (!multi || responses.size == commands.size - 2) {
-        awaitTransactionAcks("_EXEC", {
-          // Use the order of queued commands to set the order of the
-          // responses for MULTI/EXEC transaction. Otherwise for
-          // EVAL/EVALSHA, only one Response should exist.
-          respond(if (multi) {
-            commands.keys.slice(1, commands.size - 1).map(responses(_).value)
-          } else responses.values.head.value)
-          commands.clear
-          responses.clear
-          context.become(receiveCommand)
-        })
-      }
+      if (!multi || responses.size == commands.size - 2)
+      awaitTransactionAcks("_EXEC", endTransaction)
   }: Receive) orElse receiveCommand  // ClientNode may still receive commands.
 
   /**
