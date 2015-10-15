@@ -116,6 +116,12 @@ case class Command(
   lazy val streaming: Boolean = attribute("streaming") == "true"
 
   /**
+   * When the command is routed (via CommandProcessing.route)
+   * it should be broadcast to all KeyNode actors.
+   */
+  lazy val broadcast: Boolean = attribute("broadcast") == "true"
+
+  /**
    * Does the command operate on a single key, provided by the next
    * arg after its name. The default is true since most commands
    * are modelled this way.
@@ -253,36 +259,29 @@ trait CommandProcessing extends Actor {
    * Sends an unrouted Command to one or more KeyNode actors, either by
    * routing by key, or broadcasting to all.
    */
-  def route(
-      input: Seq[Any] = Seq(),
-      client: Option[ActorRef] = None,
-      clientCommand: Option[Command] = None,
-      broadcast: Boolean = false): Unit = {
-
-    // A Command can be pre-constructed (by a ClientNode which does so
-    // in order to first validate it), or constructed here with the
-    // given set of Command args, which is the common case for Node
-    // actors wanting to trigger commands themselves.
-    val c = clientCommand match {
-      case Some(command) => command
-      case None => Command(input, client, command.db, command.clientId)
-    }
-
-    if (c.kind == "client") {
+  def route(command: Command) = {
+    if (command.kind == "client") {
       // For client commands, just send the command back to the
       // ClientNode actor.
-      self ! c
+      self ! command
     } else {
       // We don't specifically need the Routable wrapper when
       // broadcasting, since the Command will go to all KeyNode actors,
       // but doing so ensures the Command still goes through the KeyNode
       // actor's validate method, which is needed for transaction
       // handling (more specifically, for the "_DEL" command).
-      val keys = context.system.actorSelection("/user/keys")
-      keys ! (if (broadcast) Broadcast(Routable(c)) else Routable(c))
+      val payload = if (command.broadcast) Broadcast(Routable(command)) else Routable(command)
+      context.system.actorSelection("/user/keys") ! payload
     }
-
   }
+
+  /**
+   * Shortcut route method for sending command input without a
+   * constructed Command instance, using the state of the
+   * current command (eg: db, clientID).
+   */
+  def route(input: Seq[Any], client: Option[ActorRef] = None): Unit =
+    route(Command(input, client, command.db, command.clientId))
 
   /**
    * Stops the actor - we define this shortcut to give subclassing traits

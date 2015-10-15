@@ -869,7 +869,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   /**
    * Routes the given Command instance, initializing its timeout event.
    */
-  def routeCommand(command: Command) = {
+  def routeWithTimeout(command: Command) = {
     streaming = command.streaming
     if (!streaming && commandTimeout > 0) {
       val id = command.id
@@ -880,7 +880,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
         }
       }
     }
-    route(clientCommand = Some(command))
+    route(command)
   }
 
   /**
@@ -922,7 +922,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
             // Committing a transaction, start the first step.
             awaitTransactionAcks("_MULTI", {
               context.become(awaitTransactionResponses)
-              commands.values.foreach(routeCommand)
+              commands.values.foreach(routeWithTimeout)
             })
           case _ if multi =>
             // Since SELECT modifies subsequent commands as they're
@@ -933,7 +933,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
             respond(SimpleReply(if (commands.size == 1) "OK" else "QUEUED"))
           case _ =>
             // No transaction, send the command.
-            routeCommand(commands.head._2)
+            routeWithTimeout(commands.head._2)
         }
     }
   }
@@ -987,7 +987,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
           keyCount -= kc
           if (keyCount == 0) {context.unbecome; timeout.cancel(); onComplete}
       })
-      route(commandName +: keys.toSeq, client = Some(self), broadcast = true)
+      route(commandName +: keys.toSeq, client = Some(self))
     }
   }
 
@@ -1019,7 +1019,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
   def awaitTransactionResponses(): Receive = ({
     case response @ Response(_: ErrorReply, _) if transactionAbortOnError =>
       val keys = commands.values.flatMap(_.keys).toSet
-      route("_DISCARD" +: keys.toSeq, broadcast = true)
+      route("_DISCARD" +: keys.toSeq)
       // Set all responses to null, and then put the error response
       // against its ID - this way when the sequence of ordered
       // responses is sent back as one response, clients can determine

@@ -314,8 +314,8 @@ trait ScriptingClient extends Scripting {
     case "SCRIPT"   =>
       args(0).toUpperCase match {
         case "EXISTS" => aggregate(Props[AggregateScriptExists])
-        case "FLUSH"  => route(Seq("_SCRIPTFLUSH"), broadcast = true); SimpleReply()
-        case "LOAD"   => route(clientCommand = Some(command.copy(Seq("_SCRIPTLOAD", sha1, args(1)))))
+        case "FLUSH"  => route(Seq("_SCRIPTFLUSH")); SimpleReply()
+        case "LOAD"   => route(command.copy(Seq("_SCRIPTLOAD", sha1, args(1))))
       }
   }
 

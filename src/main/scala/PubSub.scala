@@ -119,7 +119,7 @@ trait PubSubClient extends CommandProcessing {
     val pattern = command.name.head == 'p'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
-    xs.foreach {x => route(Seq("_" + command.name, x), client = command.client, broadcast = pattern)}
+    xs.foreach {x => route(command.copy(Seq("_" + command.name, x)))}
   }
 
   /**
@@ -129,7 +129,7 @@ trait PubSubClient extends CommandProcessing {
    */
   override def stop(): Unit = {
     channels.foreach {x => route(Seq("_UNSUBSCRIBE", x), client = Some(self))}
-    patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), client = Some(self), broadcast = true)}
+    patterns.foreach {x => route(Seq("_PUNSUBSCRIBE", x), client = Some(self))}
     super.stop()
   }
 
