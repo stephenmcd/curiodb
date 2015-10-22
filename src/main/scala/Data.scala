@@ -499,4 +499,3 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
   }
 
 }
-

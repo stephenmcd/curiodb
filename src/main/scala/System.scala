@@ -56,9 +56,11 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   /**
    * MVCC map of transaction values for the Node mapped to client IDs,
    * including the committed "main" value, which is identified with
-   * an empty string as its key.
+   * an empty string as its key. LinkedHashMap is used so that we can
+   * access the most recently written value when transaction isolation
+   * is configued as read-uncommitted.
    */
-  var values = mutable.Map[String, T]("" -> emptyValue)
+  var values = mutable.LinkedHashMap[String, T]("" -> emptyValue)
 
   /**
    * Returns the default value for the type of Node, which subclasses
@@ -70,10 +72,12 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   def emptyValue: T
 
   /**
-   * Value getter - checks for a transaction value and falls back to
-   * the main value.
+   * Value getter - checks for a transaction value, and falls back to
+   * the main committed value (for read committed isolation) or latest
+   * value (for read uncommitted isolation).
    */
-  def value: T = values.getOrElse(command.clientId, values(""))
+  def value: T =
+    values.getOrElse(command.clientId, values(if (readUncommitted) values.keys.last else ""))
 
   /**
    * Value setter - writes the current value, either to the main
@@ -93,6 +97,11 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * Checks if the current Command is in a transaction.
    */
   def inTransaction: Boolean = values.contains(command.clientId)
+
+  /**
+   * Is transaction isolation set to read uncommitted.
+   */
+  val readUncommitted = context.system.settings.config.getString("curiodb.transactions.isolation") == "uncommitted"
 
   /**
    * The most recently saved snapshot. We store it on save and recover,
@@ -141,11 +150,18 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * scheduled, according to the value of the persisting var.
    */
   def save(): Unit = {
-    if (persistAfter == 0) {
-      saveSnapshot(value)
-    } else if (persistAfter > 0 && !persisting) {
-      persisting = true
-      context.system.scheduler.scheduleOnce(persistAfter milliseconds) {self ! Persist}
+    if (readUncommitted) {
+      // Update insertion order.
+      val key = if (inTransaction) command.clientId else ""
+      values(key) = values.remove(key).get
+    }
+    if (!inTransaction) {
+      if (persistAfter == 0) {
+        saveSnapshot(value)
+      } else if (persistAfter > 0 && !persisting) {
+        persisting = true
+        context.system.scheduler.scheduleOnce(persistAfter milliseconds) {self ! Persist}
+      }
     }
   }
 
@@ -178,7 +194,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   def receiveCommand: Receive = {
     case SaveSnapshotSuccess(meta) => lastSnapshot = Some(meta); deleteOldSnapshots()
     case SaveSnapshotFailure(_, e) => log.error(e, "Snapshot write failed")
-    case Persist    => persisting = false; saveSnapshot(value)
+    case Persist    => persisting = false; saveSnapshot(values(""))
     case Delete     => deleteOldSnapshots(stopping = true); stop()
     case Sleep      => stop()
     case c: Command =>
@@ -841,6 +857,10 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    */
   var transactionError = false
 
+  /**
+   * Should transactions abort if any of their commands receives
+   * an error response.
+   */
   val transactionAbortOnError = context.system.settings.config.getString("curiodb.transactions.on-error") == "abort"
 
   /**
