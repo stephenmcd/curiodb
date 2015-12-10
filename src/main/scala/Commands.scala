@@ -104,6 +104,7 @@ object Commands {
       case "neg1"   => -1
       case "neg2"   => -2
       case "seq"    => Seq()
+      case "set"    => mutable.Set()
       case "SCAN"   => Seq("0", "")
       case "nils"   => args.map(_ => null)
       case "zeros"  => args.map(_ => 0)
