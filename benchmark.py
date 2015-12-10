@@ -4,6 +4,7 @@
 
 from contextlib import contextmanager
 from collections import OrderedDict
+from itertools import count
 from subprocess import Popen, STDOUT, PIPE
 
 
@@ -37,13 +38,8 @@ def server(name):
     yield
     shutdown()
 
-bench_count = 0
-def benchmark(extra_text=""):
-    global bench_count
-    bench_count += 1
-    if extra_text:
-        extra_text += " "
-    banner("Benchmarking %s %s%s/3" % (which, extra_text, bench_count))
+def benchmark(extra_text="", bench_count=count(1)):
+    banner("Benchmarking %s %s%s/3" % (which, extra_text, bench_count.next()))
     for line in proc("redis-benchmark -q").stdout:
         if line.strip():
             parts = line.split()
@@ -61,8 +57,8 @@ with server("Redis"):
     benchmark()
 
 with server("CurioDB"):
-    benchmark("(cold)")
-    benchmark("(hot)")
+    benchmark("(cold) ")
+    benchmark("(hot) ")
 
 with open("README.md") as f:
     lines = f.readlines()

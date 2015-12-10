@@ -295,7 +295,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * knows how to accept fromValue. Renaming is basically a delete,
    * then create a new node, so we first delete ourselves (via the
    * internal _DEL command), then pass the fromValue arg with the given
-   * command to  what will be a newly created Node.
+   * command to what will be a newly created Node.
    */
   def rename(fromValue: Any, toCommand: String): Unit =
     if (command.key != args(0)) {
@@ -403,7 +403,7 @@ case class NodeEntry(
  * provide, virtual memory, which simply allows a Node to persist
  * its value to disk, and shut down after a period of time (defined by
  * the curiodb.sleep-after duration value in reference.conf). The
- * difference between this occuring and a Node being deleted, is that
+ * difference between this occurring and a Node being deleted, is that
  * the key and NodeEntry is kept in the keyspace map. This is also why
  * the ActorRef for each Node in a NodeEntry is an Option - a value of
  * None indicates a sleeping Node. When a command is run against a key
