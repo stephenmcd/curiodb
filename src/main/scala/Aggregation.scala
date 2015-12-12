@@ -274,9 +274,8 @@ class AggregateBitOp extends Aggregate[mutable.BitSet]("_BGET") {
       case "OR"  => ordered.reduce(_ | _)
       case "XOR" => ordered.reduce(_ ^ _)
       case "NOT" =>
-        val from = ordered(0).headOption.getOrElse(1) - 1
-        val to = ordered(0).lastOption.getOrElse(1) - 1
-        mutable.BitSet(from until to: _*) ^ ordered(0)
+        val end = ordered(0).lastOption.getOrElse(-1)
+        mutable.BitSet(0 to end: _*) ^ ordered(0)
     }
     route(Seq("_BSTORE", args(1)) ++ result, destination = command.destination)
   }
