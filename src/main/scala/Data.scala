@@ -147,7 +147,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
     case "HVALS"        => value.values
     case "HDEL"         => val x = run("HEXISTS"); value -= args(0); x
     case "HLEN"         => value.size
-    case "HMGET"        => args.map(value.get(_))
+    case "HMGET"        => args.map(value.getOrElse(_, null))
     case "HMSET"        => argsPaired.foreach {args => value(args._1) = args._2}; SimpleReply()
     case "HINCRBY"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
     case "HINCRBYFLOAT" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
