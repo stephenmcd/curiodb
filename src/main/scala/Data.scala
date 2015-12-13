@@ -386,7 +386,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
    */
   def rank(key: String, reverse: Boolean = false): Int = {
     val index = scores.entryIndex(SortedSetEntry(keys.get(key), key))
-    if (reverse) keys.size - index else index
+    if (reverse) keys.size - index - 1 else index
   }
 
   /**
@@ -425,7 +425,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
     def parse(arg: String, dir: Float) = arg match {
       case "-inf" => if (scores.isEmpty) 0 else scores.first().score
       case "+inf" => if (scores.isEmpty) 0 else scores.last().score
-      case arg if arg.startsWith("(") => arg.toFloat + dir
+      case arg if arg.startsWith("(") => arg.tail.toFloat + dir
       case _ => arg.toFloat
     }
     range(SortedSetEntry(parse(from, 1)), SortedSetEntry(parse(to, -1) + 1), reverse)
