@@ -226,8 +226,8 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
    * item for the given count, in either direction in linear time.
    */
   def remove: Int = {
-    val item = args(0)
-    val count = args(1).toInt
+    val count = args(0).toInt
+      val item = args(1)
     var result = 0
     val iter = if (count >= 0) value.clone.iterator else value.clone.reverseIterator
     value.clear
