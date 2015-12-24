@@ -7,7 +7,7 @@ replacement for Redis is purely incidental. :-)
 
 ## Installation
 
-I've been using [SBT][sbt] to build the project, which you can install
+I've been using [sbt][sbt] to build the project, which you can install
 on [OS X][sbt-osx], [Linux][sbt-linux] or [Windows][sbt-windows]. With
 that done, you just need to clone this repository and run it:
 
@@ -106,9 +106,10 @@ flow of a client sending a command:
   cluster using consistent hashing. A Client Node will forward the
   command to the matching Key Node for its key.
 * A Key Node is then responsible for creating, removing, and
-  communicating with each KV actor, which are the actual Nodes for each
-  key and value, such as a string, hash, sorted set, etc
-  ([Data.scala][data-source]).
+  communicating with each KV Node actor, which are the actual actors
+  that store the underlying value for each key, such as a strings,
+  hashes, and sorted sets, and perform the operations on them for each
+  of their respective commands. ([Data.scala][data-source]).
 * The KV Node then sends a response back to the originating Client
   Node, which returns it to the outside client.
 
@@ -128,13 +129,64 @@ Not diagrammed, but in addition to the above:
   which store and run compiled Lua scripts (via `EVALSHA`), and Client
   Nodes which can run uncompiled scripts directly (via `EVAL`).
 
+## Transactions
+
+Distributed transactions are fully supported, both by way of the
+`MULTI` and `EXEC` commands, and for Lua scripts with the `EVAL` and
+`EVALSHA` commands. Transactions are implemented using basic
+[two-phase commit (2PC)][2pc] with rollback support,
+[multiversion concurrency control (MVCC)][mvcc], and configurable
+[isolation levels][isolation].
+
+##### 2PC
+
+A Client Node acts as a transaction coordinator in 2PC parlance. It is
+responsible for coordinating initial agreement with each Node that will
+participate in the transaction, aggregating responses for all executed
+(but uncommitted) commands, and then finally coordinating the commit
+phase for each participating Node. Given the use of MVCC, performing
+rollback on errors during a transaction is fully supported, and is the
+default behavior. This differs however from the way Redis deals with
+errors, as it [does not support transaction rollbacks][redis-rollback],
+therefore in CurioDB the behavior can be configured by changing the
+`curiodb.transactions.on-error` setting from `rollback` to `commit`, if
+this level of compatibility with Redis is required.
+
+##### MVCC
+
+Each KV Node in the system stores multiple versions of its underlying
+value internally, using a map that contains each transaction's version,
+as well as the current committed version of the value, or "main" value.
+When a transaction begins, the main value is copied into the map,
+stored against its transaction ID, and from that point, all commands
+received within the transaction will read and write to the transaction
+version until the transaction is commited, at which point the
+transaction version is copied back to the main value.
+
+##### Isolation
+
+Three levels of [transaction isolation][isolation] are available,
+which can be configured by the `curiodb.transactions.isolation`
+setting, to control how a key's value is read during a command:
+
+* `repeatable` (default): Inside a transaction, only the transaction's
+  version will be read, otherwise when outside of a transaction, the
+  current committed version will be read.
+* `committed`: Inside or outside of a transaction, the current
+  committed version will be read.
+* `uncommitted`: Inside or outside of a transaction, the most recently
+  written version wil be read, even if uncommitted.
+
+Note there is no `serializable` isolation level typically found in SQL
+databases, since neither Redis nor CurioDB have a notion range queries.
+
 ## Configuration
 
 Here are the few configuration settings and their default values that
 CurioDB implements, along with the large range of settings
 [provided by Akka][akka-config] itself, which both use
-[typesafe-config][typesafe-config] - consult those projects for more
-info.
+[typesafe-config][typesafe-config] - consult those projects for
+detailed information on configuration implementation.
 
 ```
 curiodb {
@@ -151,6 +203,17 @@ curiodb {
   sleep-after   = 10 seconds  // Virtual memory threshold.
   expire-after  = off         // Automatic key expiry.
 
+  transactions {
+    timeout   = 3 seconds     // Max time a transaction may take to run.
+    isolation = repeatable    // "repeatable", "committed", or "uncommitted".
+    on-error  = rollback      // "commit" or "rollback".
+  }
+
+  commands {
+    timeout  = 1 second       // Max time a command may take to run.
+    disabled = [SHUTDOWN]     // List of disabled commands.
+  }
+
   // Cluster nodes.
   nodes = {
     node1: "tcp://127.0.0.1:9001"
@@ -160,9 +223,6 @@ curiodb {
 
   // Current cluster node (from the "nodes" keys above).
   node = node1
-
-  // List of disabled commands.
-  commands.disabled = [SHUTDOWN]
 
 }
 ```
@@ -245,8 +305,6 @@ body.
   stored on every node in the cluster, and the `PSUBSCRIBE` and
   `PUNSUBSCRIBE` commands get broadcast to all of them. This needs
   rethinking!
-* No transaction support.
-* Lua scripts are not atomic.
 
 Mainly though, Redis is an extremely mature and battle-tested project
 that's been developed by many over the years, while CurioDB is a
@@ -308,6 +366,10 @@ BSD.
 [pubsub-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/PubSub.scala
 [scripting-source]: https://github.com/stephenmcd/curiodb/blob/master/src/main/scala/Scripting.scala
 [luaj]: http://www.luaj.org/luaj/3.0/README.html
+[2pc]: https://en.wikipedia.org/wiki/Two-phase_commit_protocol
+[mvcc]: https://en.wikipedia.org/wiki/Multiversion_concurrency_control
+[isolation]: https://en.wikipedia.org/wiki/Isolation_(database_systems)
+[redis-rollback]: http://redis.io/topics/transactions#why-redis-does-not-support-roll-backs
 [akka-config]: http://doc.akka.io/docs/akka/snapshot/general/configuration.html#listing-of-the-reference-configuration
 [typesafe-config]: https://github.com/typesafehub/config#standard-behavior
 [benchmark-script]: https://github.com/stephenmcd/curiodb/blob/master/benchmark.py
