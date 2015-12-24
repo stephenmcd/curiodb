@@ -72,12 +72,22 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   def emptyValue: T
 
   /**
-   * Value getter - checks for a transaction value, and falls back to
-   * the main committed value (for read committed isolation) or latest
-   * value (for read uncommitted isolation).
+   * Value getter according to the configured transaction isolation
+   * level:
+   *
+   * - repeatable:  should always return the value of the current transaction
+   * - uncommitted: always returns the newest written value, even if uncommitted
+   * - committed:   always return the commit value, even inside a transaction
+   *
+   * Note that there is no "serializable" level since there is no notion of
+   * a range query. You can read more info on isolation levels here:
+   * https://en.wikipedia.org/wiki/Isolation_(database_systems)
    */
-  def value: T =
-    values.getOrElse(command.clientId, values(if (readUncommitted) values.keys.last else ""))
+  def value: T = values(isolationLevel match {
+    case "repeatable" if inTransaction => command.clientId // transaction value
+    case "uncommitted"                 => values.keys.last // most recent value
+    case _                             => ""               // committed value
+  })
 
   /**
    * Value setter - writes the current value, either to the main
@@ -99,9 +109,10 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
   def inTransaction: Boolean = values.contains(command.clientId)
 
   /**
-   * Is transaction isolation set to read uncommitted.
+   * Transaction isolation level: "repeatable" reads, read "committed",
+   * or read "uncommitted".
    */
-  val readUncommitted = context.system.settings.config.getString("curiodb.transactions.isolation") == "uncommitted"
+  val isolationLevel = context.system.settings.config.getString("curiodb.transactions.isolation")
 
   /**
    * The most recently saved snapshot. We store it on save and recover,
@@ -150,7 +161,7 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
    * scheduled, according to the value of the persisting var.
    */
   def save(): Unit = {
-    if (readUncommitted) {
+    if (isolationLevel == "uncommitted") {
       // Update insertion order.
       val key = if (inTransaction) command.clientId else ""
       values(key) = values.remove(key).get
@@ -861,7 +872,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * Should transactions abort if any of their commands receives
    * an error response.
    */
-  val transactionAbortOnError = context.system.settings.config.getString("curiodb.transactions.on-error") == "abort"
+  val transactionAbortOnError = context.system.settings.config.getString("curiodb.transactions.on-error") == "rollback"
 
   /**
    * Flag used to mark the ClientNode as being in "streaming" mode,
