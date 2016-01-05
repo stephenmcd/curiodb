@@ -159,6 +159,8 @@ case class Command(
     case "neg2"   => -2
     case "seq"    => Seq()
     case "scan"   => Seq("0", "")
+    case "set"    => mutable.Set()
+    case "bitset" => mutable.BitSet()
     case "nils"   => Seq.fill(args.size)(null)
     case "zeros"  => Seq.fill(args.size)(0)
     case _        => ()

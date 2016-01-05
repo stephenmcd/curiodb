@@ -153,7 +153,7 @@ class HashNode extends Node[mutable.Map[String, String]] {
     case "HVALS"        => value.values
     case "HDEL"         => val x = run("HEXISTS"); value -= args(0); x
     case "HLEN"         => value.size
-    case "HMGET"        => args.map(value.get(_))
+    case "HMGET"        => args.map(value.getOrElse(_, null))
     case "HMSET"        => args.grouped(2).foreach {pair => value(pair(0)) = pair(1)}; SimpleReply()
     case "HINCRBY"      => set(value.getOrElse(args(0), "0").toInt + args(1).toInt).toInt
     case "HINCRBYFLOAT" => set(value.getOrElse(args(0), "0").toFloat + args(1).toFloat)
@@ -234,8 +234,8 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
    * item for the given count, in either direction in linear time.
    */
   def remove(): Int = {
-    val item = args(0)
-    val count = args(1).toInt
+    val count = args(0).toInt
+    val item = args(1)
     var result = 0
     val iter = if (count >= 0) value.clone.iterator else value.clone.reverseIterator
     value.clear
@@ -398,7 +398,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
    */
   def rank(key: String, reverse: Boolean = false): Int = {
     val index = scores.entryIndex(SortedSetEntry(keys.get(key), key))
-    if (reverse) keys.size - index else index
+    if (reverse) keys.size - index - 1 else index
   }
 
   /**
@@ -437,7 +437,7 @@ class SortedSetNode extends Node[(IndexedTreeMap[String, Float], IndexedTreeSet[
     def parse(arg: String, dir: Float) = arg match {
       case "-inf" => if (scores.isEmpty) 0 else scores.first().score
       case "+inf" => if (scores.isEmpty) 0 else scores.last().score
-      case arg if arg.startsWith("(") => arg.toFloat + dir
+      case arg if arg.startsWith("(") => arg.tail.toFloat + dir
       case _ => arg.toFloat
     }
     range(SortedSetEntry(parse(from, 1)), SortedSetEntry(parse(to, -1) + 1), reverse)

@@ -49,7 +49,7 @@ trait PubSubServer extends CommandProcessing {
    * ClientNode when a change in subscription occurs.
    */
   def subscribeOrUnsubscribe(): Unit = {
-    val pattern = command.name.startsWith("_p")
+    val pattern = command.name.startsWith("_P")
     val subscriptions = if (pattern) patterns else channels
     val key = if (pattern) args(0) else command.key
     val subscriber = command.client.get
@@ -116,7 +116,7 @@ trait PubSubClient extends CommandProcessing {
    * namely SUBSCRIBE/UNSUBSCRIBE/PSUBSCRIBE/PUNSUBSCRIBE.
    */
   def subscribeOrUnsubscribe(): Unit = {
-    val pattern = command.name.head == 'p'
+    val pattern = command.name.head == 'P'
     val subscribed = if (pattern) patterns else channels
     val xs = if (args.isEmpty) subscribed.toSeq else args
     xs.foreach {x => route(command.copy(Seq("_" + command.name, x)))}
@@ -160,8 +160,8 @@ trait PubSubClient extends CommandProcessing {
    */
   def receivePubSub: Receive = {
     case PubSubEvent(event, channelOrPattern) =>
-      val subscriptions = if (event.head == 'p') patterns else channels
-      val subscribing = event.stripPrefix("p") == "SUBSCRIBE"
+      val subscriptions = if (event.head == 'P') patterns else channels
+      val subscribing = event.stripPrefix("P") == "SUBSCRIBE"
       val subscribed = subscribing && subscriptions.add(channelOrPattern)
       val unsubscribed = !subscribing && subscriptions.remove(channelOrPattern)
       if (subscribed || unsubscribed) {
