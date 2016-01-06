@@ -196,7 +196,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
       blocked += command
       context.system.scheduler.scheduleOnce(args.last.toInt seconds) {
         blocked -= command
-        command.respond(null)
+        respond(null)
       }
       ()
     } else run(command.name.tail)  // Run the non-blocking version.
@@ -213,7 +213,7 @@ class ListNode extends Node[mutable.ListBuffer[String]] {
       // that the run method has access to the correct Command.
       command = blocked.head
       blocked -= command
-      command.respond(run(command.name.tail))
+      respond(run(command.name.tail))
     }
     result
   }

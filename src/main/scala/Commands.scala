@@ -185,17 +185,7 @@ case class Command(
     }
   }
 
-  /**
-   * Sends a Response (usually the result of a command) back to a
-   * the command's destination (usually a ClientNode sending a
-   * Command).
-   */
-  def respond(response: Any): Unit =
-    if (response != ()) {
-      client.foreach {client => client ! Response(response, id)}
-    }
-
-  override def toString: String = input.mkString(" ").replace("\n", " ")
+  override def toString: String = input.mkString(" ")
 
 }
 
@@ -253,6 +243,11 @@ trait CommandProcessing extends Actor {
   val commandTimeout = durationSetting("curiodb.commands.timeout")
 
   /**
+   * Flag that enables detailed command debugging.
+   */
+  val debug = context.system.settings.config.getBoolean("curiodb.commands.debug")
+
+  /**
    * Shortcut to the args of the current command.
    */
   def args: Seq[String] = command.args
@@ -261,7 +256,7 @@ trait CommandProcessing extends Actor {
    * Sends an unrouted Command to one or more KeyNode actors, either by
    * routing by key, or broadcasting to all.
    */
-  def route(command: Command) = {
+  def route(command: Command): Unit = {
     if (command.kind == "client") {
       // For client commands, just send the command back to the
       // ClientNode actor.
@@ -284,6 +279,29 @@ trait CommandProcessing extends Actor {
    */
   def route(input: Seq[Any], client: Option[ActorRef] = None): Unit =
     route(Command(input, client, command.db, command.clientId))
+
+  /**
+   * Sends a Response (usually the result of a command) back to
+   * the command's destination (usually a ClientNode sending a
+   * Command).
+   */
+  def respond(response: Any): Unit = {
+    if (debug) {
+      def path(x: ActorRef): String = x.path.toString.replace("akka://curiodb/user/", "")
+      println(Seq(
+        "",
+        s"ID:       ${command.id}",
+        s"Node:     ${path(self)} (${getClass.getName.split('.').last})",
+        s"Dest:     ${path(command.client.get)}",
+        s"Command:  $command",
+        s"Response: $response",
+        ""
+      ).mkString("\n"))
+    }
+    if (response != ()) {
+      command.client.foreach {client => client ! Response(response, command.id)}
+    }
+  }
 
   /**
    * Stops the actor - we define this shortcut to give subclassing traits

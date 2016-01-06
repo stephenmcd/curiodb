@@ -219,7 +219,7 @@ class ScriptRunner(compiled: LuaScript) extends CommandProcessing with ActorLogg
       globals.set("redis", api)
 
       // Run the script and return its result back to the ClientNode.
-      command.respond(Try((new LuaClosure(compiled, globals)).call()) match {
+      respond(Try((new LuaClosure(compiled, globals)).call()) match {
         case Success(result) => Coerce.fromLua(result)
         case Failure(e)      => log.debug("Lua runtime error", e.getMessage); ErrorReply(e.getMessage)
       })

@@ -142,7 +142,7 @@ abstract class Aggregate[T](val commandName: String) extends Actor with CommandP
       val idOrInt = if (responses.contains(id)) (responses.size + 1).toString else id
       responses(idOrInt) = value.asInstanceOf[T]
       if (responses.size == keys.size) {
-        command.respond(Try(complete()) match {
+        respond(Try(complete()) match {
           case Success(response) => response
           case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply()
         })

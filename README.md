@@ -212,6 +212,7 @@ curiodb {
   commands {
     timeout  = 1 second       // Max time a command may take to run.
     disabled = [SHUTDOWN]     // List of disabled commands.
+    debug    = off            // Print debug info for every command run.
   }
 
   // Cluster nodes.

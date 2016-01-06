@@ -221,11 +221,10 @@ abstract class Node[T] extends PersistentActor with CommandProcessing with Actor
         // aborted and no committed value exists.
         values.remove("")
       }
-      val response = Try((run orElse runForAnyNode)(command.name)) match {
+      respond(Try((run orElse runForAnyNode)(command.name)) match {
         case Success(response) => if (command.writes) save(); response
         case Failure(e) => log.error(e, s"Error running: $command"); ErrorReply("Unknown error")
-      }
-      command.respond(response)
+      })
   }
 
   /**
@@ -741,7 +740,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "_FLUSHDB"      => db().keys.map(key => delete(key)); SimpleReply()
     case "_FLUSHALL"     => value.foreach {case (dbName, entries) => entries.keys.map({key => delete(key, Some(dbName))})}; SimpleReply()
     case "EXISTS"        => args.map(exists)
-    case "TTL"           => val t = ttl; if (t == -1) t else t / 1000
+    case "TTL"           => val x = ttl; if (x == -1) x else x / 1000
     case "PTTL"          => ttl
     case "EXPIRE"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
     case "PEXPIRE"       => expire(System.currentTimeMillis + args(0).toInt)
@@ -761,7 +760,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
    */
   override def receiveCommand: Receive = ({
     case Routable(c) => command = c; validate match {
-      case Some(errorOrDefault) => command.respond(errorOrDefault)
+      case Some(errorOrDefault) => respond(errorOrDefault)
       case None =>
         if (command.overwrites && !db().get(command.key).filter(_.kind != command.kind).isEmpty) delete(command.key)
         node() ! command
@@ -828,7 +827,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
     case "PING"           => SimpleReply("PONG")
     case "TIME"           => val x = System.nanoTime; Seq(x / 1000000000, x % 1000000)
     case "SHUTDOWN"       => context.system.terminate(); SimpleReply()
-    case "QUIT"           => respond(SimpleReply()); self ! Delete
+    case "QUIT"           => respondFinal(SimpleReply()); self ! Delete
     case "MULTI" | "EXEC" => ()
   }: CommandRunner) orElse runPubSub orElse runAggregate orElse runScripting
 
@@ -889,7 +888,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
     transactionError = false
     responses.clear
     commands.clear
-    respond(response)
+    respondFinal(response)
   }
 
   /**
@@ -906,7 +905,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
       val id = command.id
       context.system.scheduler.scheduleOnce(commandTimeout milliseconds) {
         commands.remove(id) match {
-          case Some(c) => respond(ErrorReply(s"Timeout on $c"))
+          case Some(c) => respondFinal(ErrorReply(s"Timeout on $c"))
           case None    =>
         }
       }
@@ -929,7 +928,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
     client = Some(sender())
     validate match {
       case Some(error) =>
-        respond(error)
+        respondFinal(error)
         // If we're in a transaction, note the error so we can abort
         // when EXEC is run.
         if (multi) transactionError = true
@@ -961,7 +960,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
             // again within a transaction (which happens) does nothing.
             if (command.name == "SELECT") run(command.name)
             // Adding commands to a transaction, send SimpleReply.
-            respond(SimpleReply(if (commands.size == 1) "OK" else "QUEUED"))
+            respondFinal(SimpleReply(if (commands.size == 1) "OK" else "QUEUED"))
           case _ =>
             // No transaction, send the command.
             routeWithTimeout(commands.head._2)
@@ -1028,7 +1027,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * responses, ordered by their corresponding commands.
    */
   def endTransaction() = {
-    respond(if (multi) {
+    respondFinal(if (multi) {
       commands.keys.slice(1, commands.size - 1).toSeq.map(responses(_).value)
     } else responses.values.head.value)
     commands.clear
@@ -1070,7 +1069,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
    * Sends a final response back to the original actor that provided the
    * input for the Command.
    */
-  def respond(response: Any): Unit = client.get ! formatResponse(response)
+  def respondFinal(response: Any): Unit = client.get ! formatResponse(response)
 
   /**
    * Hook for subclasses to override and convert a response value
@@ -1087,7 +1086,7 @@ abstract class ClientNode extends Node[Null] with PubSubClient with AggregateCom
     case response: Response =>
       commands.remove(response.id) match {
         case None if !streaming => log.error(s"Client received response after timeout $response")
-        case _                  => respond(response.value)
+        case _                  => respondFinal(response.value)
       }
   }: Receive) orElse receivePubSub orElse super.receiveCommand
 
