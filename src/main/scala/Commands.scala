@@ -37,9 +37,12 @@ object Attributes {
   /**
    * Looks up an attribute for a command.
    */
-  def get(commandName: String, attributeName: String): String =
-    attributes(commandName).getOrElse(attributeName, "")
-
+  def get(commandName: String, attributeName: String): String = {
+    if (attributes.contains(commandName))
+      attributes(commandName).getOrElse(attributeName, "")
+    else
+      ""
+  }
 }
 
 /**
