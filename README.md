@@ -1,3 +1,5 @@
+<p align="center"><img src="http://blog.jupo.org/static/img/curiodb-logo.png"></p>
+
 Created by [Stephen McDonald][twitter]
 
 CurioDB is a distributed and persistent [Redis][redis] clone, built
@@ -175,7 +177,7 @@ setting, to control how a key's value is read during a command:
 * `committed`: Inside or outside of a transaction, the current
   committed version will be read.
 * `uncommitted`: Inside or outside of a transaction, the most recently
-  written version wil be read, even if uncommitted.
+  written version will be read, even if uncommitted.
 
 Note there is no `serializable` isolation level typically found in SQL
 databases, since neither Redis nor CurioDB have a notion range queries.
@@ -339,6 +341,14 @@ Benchmark      | Redis    | CurioDB  | %
 
 *Generated with the bundled [benchmark.py][benchmark-script] script.*
 
+## Further Reading
+
+These are some articles I published on developing CurioDB:
+
+* [CurioDB: A Distributed and Persistent Redis Clone][intro-article]
+* [Embedding Lua in Scala using Java][lua-article]
+* [Distributed Transactions in Actor Systems][transactions-article]
+
 ## License
 
 BSD.
@@ -374,3 +384,6 @@ BSD.
 [akka-config]: http://doc.akka.io/docs/akka/snapshot/general/configuration.html#listing-of-the-reference-configuration
 [typesafe-config]: https://github.com/typesafehub/config#standard-behavior
 [benchmark-script]: https://github.com/stephenmcd/curiodb/blob/master/benchmark.py
+[intro-article]: http://blog.jupo.org/2015/07/08/curiodb-a-distributed-persistent-redis-clone/
+[lua-article]: http://blog.jupo.org/2015/08/08/embedding-lua-in-scala-with-java-oh-my/
+[transactions-article]: http://blog.jupo.org/2016/01/28/distributed-transactions-in-actor-systems/
