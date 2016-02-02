@@ -3,9 +3,9 @@
 Created by [Stephen McDonald][twitter]
 
 CurioDB is a distributed and persistent [Redis][redis] clone, built
-with [Scala][scala] and [Akka][akka]. Please note that this is a toy
-project, hence the name "Curio", and any suitability as a drop-in
-replacement for Redis is purely incidental. :-)
+with [Scala][scala] and [Akka][akka]. Please note that despite the
+fancy logo, this is a toy project, hence the name "Curio", and any
+suitability as a drop-in replacement for Redis is purely incidental. :-)
 
 ## Installation
 
