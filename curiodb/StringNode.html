@@ -1,0 +1,2157 @@
+<!DOCTYPE html >
+<html>
+        <head>
+          <title>StringNode - curiodb.StringNode</title>
+          <meta name="description" content="StringNode - curiodb.StringNode" />
+          <meta name="keywords" content="StringNode curiodb.StringNode" />
+          <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+          
+      <link href="../lib/template.css" media="screen" type="text/css" rel="stylesheet" />
+      <link href="../lib/diagrams.css" media="screen" type="text/css" rel="stylesheet" id="diagrams-css" />
+      <script type="text/javascript" src="../lib/jquery.js" id="jquery-js"></script>
+      <script type="text/javascript" src="../lib/jquery-ui.js"></script>
+      <script type="text/javascript" src="../lib/template.js"></script>
+      <script type="text/javascript" src="../lib/tools.tooltip.js"></script>
+      
+      <script type="text/javascript">
+         if(top === self) {
+            var url = '../index.html';
+            var hash = 'curiodb.StringNode';
+            var anchor = window.location.hash;
+            var anchor_opt = '';
+            if (anchor.length >= 1)
+              anchor_opt = '@' + anchor.substring(1);
+            window.location.href = url + '#' + hash + anchor_opt;
+         }
+   	  </script>
+    
+        </head>
+        <body class="type">
+      <div id="definition">
+        <img alt="Class" src="../lib/class_big.png" />
+        <p id="owner"><a href="package.html" class="extype" name="curiodb">curiodb</a></p>
+        <h1>StringNode</h1><h3><span class="morelinks"><div>Related Doc:
+            <a href="package.html" class="extype" name="curiodb">package curiodb</a>
+          </div></span></h3><span class="permalink">
+      <a href="../index.html#curiodb.StringNode" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      </div>
+
+      <h4 id="signature" class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">class</span>
+      </span>
+      <span class="symbol">
+        <span class="name">StringNode</span><span class="result"> extends <a href="Node.html" class="extype" name="curiodb.Node">Node</a>[<span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4>
+      
+          <div id="comment" class="fullcommenttop"><div class="comment cmt"><p>String commands. Note that unlike Redis, bitmap and HLL commands
+have their own data types and corresponding classes, namely
+BitmapNode and HyperLogLogNode.
+</p></div><div class="toggleContainer block">
+          <span class="toggle">Linear Supertypes</span>
+          <div class="superTypes hiddenContent"><a href="Node.html" class="extype" name="curiodb.Node">Node</a>[<span class="extype" name="scala.Predef.String">String</span>], <span class="extype" name="akka.actor.ActorLogging">ActorLogging</span>, <a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a>, <span class="extype" name="akka.persistence.PersistentActor">PersistentActor</span>, <span class="extype" name="akka.persistence.Eventsourced">Eventsourced</span>, <span class="extype" name="akka.persistence.PersistenceRecovery">PersistenceRecovery</span>, <span class="extype" name="akka.persistence.PersistenceIdentity">PersistenceIdentity</span>, <span class="extype" name="akka.actor.StashFactory">StashFactory</span>, <span class="extype" name="akka.actor.Stash">Stash</span>, <span class="extype" name="akka.dispatch.RequiresMessageQueue">RequiresMessageQueue</span>[<span class="extype" name="akka.dispatch.DequeBasedMessageQueueSemantics">DequeBasedMessageQueueSemantics</span>], <span class="extype" name="akka.actor.UnrestrictedStash">UnrestrictedStash</span>, <span class="extype" name="akka.actor.StashSupport">StashSupport</span>, <span class="extype" name="akka.persistence.Snapshotter">Snapshotter</span>, <span class="extype" name="akka.actor.Actor">Actor</span>, <span class="extype" name="scala.AnyRef">AnyRef</span>, <span class="extype" name="scala.Any">Any</span></div>
+        </div></div>
+        
+
+      <div id="mbrsel">
+        <div id="textfilter"><span class="pre"></span><span class="input"><input id="mbrsel-input" type="text" accesskey="/" /></span><span class="post"></span></div>
+        <div id="order">
+              <span class="filtertype">Ordering</span>
+              <ol>
+                
+                <li class="alpha in"><span>Alphabetic</span></li>
+                <li class="inherit out"><span>By inheritance</span></li>
+              </ol>
+            </div>
+        <div id="ancestors">
+                <span class="filtertype">Inherited<br />
+                </span>
+                <ol id="linearization">
+                  <li class="in" name="curiodb.StringNode"><span>StringNode</span></li><li class="in" name="curiodb.Node"><span>Node</span></li><li class="in" name="akka.actor.ActorLogging"><span>ActorLogging</span></li><li class="in" name="curiodb.CommandProcessing"><span>CommandProcessing</span></li><li class="in" name="akka.persistence.PersistentActor"><span>PersistentActor</span></li><li class="in" name="akka.persistence.Eventsourced"><span>Eventsourced</span></li><li class="in" name="akka.persistence.PersistenceRecovery"><span>PersistenceRecovery</span></li><li class="in" name="akka.persistence.PersistenceIdentity"><span>PersistenceIdentity</span></li><li class="in" name="akka.actor.StashFactory"><span>StashFactory</span></li><li class="in" name="akka.actor.Stash"><span>Stash</span></li><li class="in" name="akka.dispatch.RequiresMessageQueue"><span>RequiresMessageQueue</span></li><li class="in" name="akka.actor.UnrestrictedStash"><span>UnrestrictedStash</span></li><li class="in" name="akka.actor.StashSupport"><span>StashSupport</span></li><li class="in" name="akka.persistence.Snapshotter"><span>Snapshotter</span></li><li class="in" name="akka.actor.Actor"><span>Actor</span></li><li class="in" name="scala.AnyRef"><span>AnyRef</span></li><li class="in" name="scala.Any"><span>Any</span></li>
+                </ol>
+              </div><div id="ancestors">
+            <span class="filtertype"></span>
+            <ol>
+              <li class="hideall out"><span>Hide All</span></li>
+              <li class="showall in"><span>Show all</span></li>
+            </ol>
+          </div>
+        <div id="visbl">
+            <span class="filtertype">Visibility</span>
+            <ol><li class="public in"><span>Public</span></li><li class="all out"><span>All</span></li></ol>
+          </div>
+      </div>
+
+      <div id="template">
+        <div id="allMembers">
+        <div id="constructors" class="members">
+              <h3>Instance Constructors</h3>
+              <ol><li name="curiodb.StringNode#&lt;init&gt;" visbl="pub" data-isabs="false" fullComment="no" group="Ungrouped">
+      <a id="&lt;init&gt;():curiodb.StringNode"></a>
+      <a id="&lt;init&gt;:StringNode"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">new</span>
+      </span>
+      <span class="symbol">
+        <span class="name">StringNode</span><span class="params">()</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@&lt;init&gt;():curiodb.StringNode" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      
+    </li></ol>
+            </div>
+
+        <div id="types" class="types members">
+              <h3>Type Members</h3>
+              <ol><li name="curiodb.CommandProcessing.CommandRunner" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="CommandRunner=PartialFunction[String,Any]"></a>
+      <a id="CommandRunner:CommandRunner"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">type</span>
+      </span>
+      <span class="symbol">
+        <span class="name">CommandRunner</span><span class="result"> = <span class="extype" name="scala.PartialFunction">PartialFunction</span>[<span class="extype" name="scala.Predef.String">String</span>, <span class="extype" name="scala.Any">Any</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@CommandRunner=PartialFunction[String,Any]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Signature for the partial function CommandRunner that actually
+handles each command.</p><div class="fullcomment"><div class="comment cmt"><p>Signature for the partial function CommandRunner that actually
+handles each command. Every Node must implement the &quot;run&quot; method
+of this type (this requirement is actually codified in the base
+Node class). It takes a case statement mapping command names to
+the code that handles them - typically handled inline, or via a
+method if more complex. The result will then be sent back to the
+calling ClientNode, and converted into a Redis response before
+being sent back to the client socket. One special case is the
+handler returning Unit, in which case no response is sent back,
+in which case it's up to the handling code to manually send a
+response back to the client node. A common example of this is all
+of the aggregation commands, which need to coordinate with
+multiple nodes before calculating a response. But the bulk
+of commands are simple one-liners directly returning a response.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.actor.Actor.Receive" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="Receive=akka.actor.Actor.Receive"></a>
+      <a id="Receive:Receive"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">type</span>
+      </span>
+      <span class="symbol">
+        <span class="name">Receive</span><span class="result"> = <span class="extype" name="scala.PartialFunction">PartialFunction</span>[<span class="extype" name="scala.Any">Any</span>, <span class="extype" name="scala.Unit">Unit</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@Receive=akka.actor.Actor.Receive" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd></dl></div>
+    </li></ol>
+            </div>
+
+        
+
+        <div id="values" class="values members">
+              <h3>Value Members</h3>
+              <ol><li name="scala.AnyRef#!=" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="!=(x$1:Any):Boolean"></a>
+      <a id="!=(Any):Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span title="gt4s: $bang$eq" class="name">!=</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@!=(x$1:Any):Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="scala.AnyRef###" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="##():Int"></a>
+      <a id="##():Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span title="gt4s: $hash$hash" class="name">##</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@##():Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="scala.AnyRef#==" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="==(x$1:Any):Boolean"></a>
+      <a id="==(Any):Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span title="gt4s: $eq$eq" class="name">==</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@==(x$1:Any):Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#aggregate" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aggregate(props:akka.actor.Props):Unit"></a>
+      <a id="aggregate(Props):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aggregate</span><span class="params">(<span name="props">props: <span class="extype" name="akka.actor.Props">Props</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aggregate(props:akka.actor.Props):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Shortcut for creating Aggregate actors.</p><div class="fullcomment"><div class="comment cmt"><p>Shortcut for creating Aggregate actors.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#args" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="args:Seq[String]"></a>
+      <a id="args:Seq[String]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">args</span><span class="result">: <span class="extype" name="scala.Seq">Seq</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@args:Seq[String]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Shortcut to the args of the current command.</p><div class="fullcomment"><div class="comment cmt"><p>Shortcut to the args of the current command.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#aroundPostRestart" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aroundPostRestart(reason:Throwable):Unit"></a>
+      <a id="aroundPostRestart(Throwable):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aroundPostRestart</span><span class="params">(<span name="reason">reason: <span class="extype" name="scala.Throwable">Throwable</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aroundPostRestart(reason:Throwable):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../akka/package.html" class="extype" name="akka">akka</a>] </dd><dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#aroundPostStop" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aroundPostStop():Unit"></a>
+      <a id="aroundPostStop():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aroundPostStop</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aroundPostStop():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../akka/package.html" class="extype" name="akka">akka</a>] </dd><dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#aroundPreRestart" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aroundPreRestart(reason:Throwable,message:Option[Any]):Unit"></a>
+      <a id="aroundPreRestart(Throwable,Option[Any]):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aroundPreRestart</span><span class="params">(<span name="reason">reason: <span class="extype" name="scala.Throwable">Throwable</span></span>, <span name="message">message: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="scala.Any">Any</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aroundPreRestart(reason:Throwable,message:Option[Any]):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../akka/package.html" class="extype" name="akka">akka</a>] </dd><dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#aroundPreStart" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aroundPreStart():Unit"></a>
+      <a id="aroundPreStart():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aroundPreStart</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aroundPreStart():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../akka/package.html" class="extype" name="akka">akka</a>] </dd><dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#aroundReceive" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="aroundReceive(receive:Eventsourced.this.Receive,message:Any):Unit"></a>
+      <a id="aroundReceive(Receive,Any):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">aroundReceive</span><span class="params">(<span name="receive">receive: <a href="#Receive=akka.actor.Actor.Receive" class="extmbr" name="curiodb.StringNode.Receive">Receive</a></span>, <span name="message">message: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@aroundReceive(receive:Eventsourced.this.Receive,message:Any):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../akka/package.html" class="extype" name="akka">akka</a>] </dd><dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="scala.Any#asInstanceOf" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="asInstanceOf[T0]:T0"></a>
+      <a id="asInstanceOf[T0]:T0"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">asInstanceOf</span><span class="tparams">[<span name="T0">T0</span>]</span><span class="result">: <span class="extype" name="scala.Any.asInstanceOf.T0">T0</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@asInstanceOf[T0]:T0" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Any</dd></dl></div>
+    </li><li name="curiodb.Node#beginTransaction" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="beginTransaction():Any"></a>
+      <a id="beginTransaction():Any"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">beginTransaction</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Any">Any</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@beginTransaction():Any" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Moves the current value into a transaction for the current
+command's client ID.</p><div class="fullcomment"><div class="comment cmt"><p>Moves the current value into a transaction for the current
+command's client ID. This can occur at the start of a transaction
+(eg _MULTI command), or if the Node actor is created inside a
+transaction, in which case we use emptyValue, which handles the
+edge case of a Node existing, going into a transaction, being
+marked deleted, then being recreated.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#bounds" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="bounds(from:Int,to:Int,size:Int):(Int,Int)"></a>
+      <a id="bounds(Int,Int,Int):(Int,Int)"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">bounds</span><span class="params">(<span name="from">from: <span class="extype" name="scala.Int">Int</span></span>, <span name="to">to: <span class="extype" name="scala.Int">Int</span></span>, <span name="size">size: <span class="extype" name="scala.Int">Int</span></span>)</span><span class="result">: (<span class="extype" name="scala.Int">Int</span>, <span class="extype" name="scala.Int">Int</span>)</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@bounds(from:Int,to:Int,size:Int):(Int,Int)" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for handling boundary args that wrap around ends of
+sequences and count backwards when negative.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for handling boundary args that wrap around ends of
+sequences and count backwards when negative.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="scala.AnyRef#clone" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="clone():Object"></a>
+      <a id="clone():AnyRef"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">clone</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.AnyRef">AnyRef</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@clone():Object" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../java$lang.html" class="extype" name="java.lang">java.lang</a>] </dd><dt>Definition Classes</dt><dd>AnyRef</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="defval" name="classOf[java.lang.CloneNotSupportedException]">...</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="curiodb.Node#cloneValue" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="cloneValue:T"></a>
+      <a id="cloneValue:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">cloneValue</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@cloneValue:T" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Clones the value for use in a new transaction.</p><div class="fullcomment"><div class="comment cmt"><p>Clones the value for use in a new transaction. Node subclasses
+that work on mutable values must override, typically by calling
+value.clone, otherwise we just default to the current value.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.Node#closeTransaction" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="closeTransaction(clientId:String,committing:Boolean):Option[T]"></a>
+      <a id="closeTransaction(String,Boolean):Option[String]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">closeTransaction</span><span class="params">(<span name="clientId">clientId: <span class="extype" name="scala.Predef.String">String</span> = <span class="symbol"><span class="name"><a href="CommandProcessing.html#command:curiodb.Command">command.clientId</a></span></span></span>, <span name="committing">committing: <span class="extype" name="scala.Boolean">Boolean</span> = <span class="symbol">false</span></span>)</span><span class="result">: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@closeTransaction(clientId:String,committing:Boolean):Option[T]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Removes and returns the transaction value.</p><div class="fullcomment"><div class="comment cmt"><p>Removes and returns the transaction value. Expected to run twice
+per transaction - once when commitTransaction is called when
+_EXEC is received, and once when the transaction times out.
+We also check for the lack of a committed value, which indicates
+that the actor was created in a transaction
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#command" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="command:curiodb.Command"></a>
+      <a id="command:Command"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">var</span>
+      </span>
+      <span class="symbol">
+        <span class="name">command</span><span class="result">: <a href="Command.html" class="extype" name="curiodb.Command">Command</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@command:curiodb.Command" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">The current command - normally will be set when a Command
+arrives via the actor's receive method.</p><div class="fullcomment"><div class="comment cmt"><p>The current command - normally will be set when a Command
+arrives via the actor's receive method.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#commandTimeout" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="commandTimeout:Int"></a>
+      <a id="commandTimeout:Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">commandTimeout</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@commandTimeout:Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Timeout for a single command.</p><div class="fullcomment"><div class="comment cmt"><p>Timeout for a single command. Used by ClientNode to schedule
+timeout handlers for commands, and also in ScriptRunner to
+determine what the timeout for a Lua script should be.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.Node#commitTransaction" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="commitTransaction():Any"></a>
+      <a id="commitTransaction():Any"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">commitTransaction</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Any">Any</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@commitTransaction():Any" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Removes the transaction value and writes it back into the main
+value.</p><div class="fullcomment"><div class="comment cmt"><p>Removes the transaction value and writes it back into the main
+value. This could be called after the transaction has timed out,
+so we only move the value if we're still in a transaction.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.actor.Actor#context" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="context:akka.actor.ActorContext"></a>
+      <a id="context:ActorContext"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">implicit </span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">context</span><span class="result">: <span class="extype" name="akka.actor.ActorContext">ActorContext</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@context:akka.actor.ActorContext" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#debug" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="debug:Boolean"></a>
+      <a id="debug:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">debug</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@debug:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Flag that enables detailed command debugging.</p><div class="fullcomment"><div class="comment cmt"><p>Flag that enables detailed command debugging.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#deferAsync" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="deferAsync[A](event:A)(handler:A=&gt;Unit):Unit"></a>
+      <a id="deferAsync[A](A)((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">deferAsync</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="event">event: <span class="extype" name="akka.persistence.Eventsourced.deferAsync.A">A</span></span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.deferAsync.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@deferAsync[A](event:A)(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#deleteMessages" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="deleteMessages(toSequenceNr:Long):Unit"></a>
+      <a id="deleteMessages(Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">deleteMessages</span><span class="params">(<span name="toSequenceNr">toSequenceNr: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@deleteMessages(toSequenceNr:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#deleteOldSnapshots" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="deleteOldSnapshots(stopping:Boolean):Unit"></a>
+      <a id="deleteOldSnapshots(Boolean):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">deleteOldSnapshots</span><span class="params">(<span name="stopping">stopping: <span class="extype" name="scala.Boolean">Boolean</span> = <span class="symbol">false</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@deleteOldSnapshots(stopping:Boolean):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Deletes old snapshots after a new one is saved.</p><div class="fullcomment"><div class="comment cmt"><p>Deletes old snapshots after a new one is saved.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.Snapshotter#deleteSnapshot" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="deleteSnapshot(sequenceNr:Long):Unit"></a>
+      <a id="deleteSnapshot(Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">deleteSnapshot</span><span class="params">(<span name="sequenceNr">sequenceNr: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@deleteSnapshot(sequenceNr:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Snapshotter</dd></dl></div>
+    </li><li name="akka.persistence.Snapshotter#deleteSnapshots" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="deleteSnapshots(criteria:akka.persistence.SnapshotSelectionCriteria):Unit"></a>
+      <a id="deleteSnapshots(SnapshotSelectionCriteria):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">deleteSnapshots</span><span class="params">(<span name="criteria">criteria: <span class="extype" name="akka.persistence.SnapshotSelectionCriteria">SnapshotSelectionCriteria</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@deleteSnapshots(criteria:akka.persistence.SnapshotSelectionCriteria):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Snapshotter</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#durationSetting" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="durationSetting(name:String):Int"></a>
+      <a id="durationSetting(String):Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">durationSetting</span><span class="params">(<span name="name">name: <span class="extype" name="scala.Predef.String">String</span></span>)</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@durationSetting(name:String):Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Retrieves a duration config setting as milliseconds, and handles
+the value not being a duration value, so we can do something like
+set it to &quot;off&quot;, in which case we default to 0.</p><div class="fullcomment"><div class="comment cmt"><p>Retrieves a duration config setting as milliseconds, and handles
+the value not being a duration value, so we can do something like
+set it to &quot;off&quot;, in which case we default to 0.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.StringNode#emptyValue" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="emptyValue:String"></a>
+      <a id="emptyValue:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">emptyValue</span><span class="result">: <span class="extype" name="java.lang.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@emptyValue:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Returns the default value for the type of Node, which subclasses
+must override.</p><div class="fullcomment"><div class="comment cmt"><p>Returns the default value for the type of Node, which subclasses
+must override. Used to set the initial value when a Node is
+first created, and also in the edge case of resetting a
+transaction's value if within a transaction, the Node is marked
+deleted, and then recreated.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="" class="extype" name="curiodb.StringNode">StringNode</a> → <a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="scala.AnyRef#eq" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="eq(x$1:AnyRef):Boolean"></a>
+      <a id="eq(AnyRef):Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">eq</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.AnyRef">AnyRef</span></span>)</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@eq(x$1:AnyRef):Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd></dl></div>
+    </li><li name="scala.AnyRef#equals" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="equals(x$1:Any):Boolean"></a>
+      <a id="equals(Any):Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">equals</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@equals(x$1:Any):Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="curiodb.StringNode#expire" visbl="pub" data-isabs="false" fullComment="no" group="Ungrouped">
+      <a id="expire(commandName:String):Unit"></a>
+      <a id="expire(String):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">expire</span><span class="params">(<span name="commandName">commandName: <span class="extype" name="scala.Predef.String">String</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@expire(commandName:String):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Handles calling the EXPIRE/PEXPIRE commands for the SETEX/PSETEX
+commands.</p>
+    </li><li name="scala.AnyRef#finalize" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="finalize():Unit"></a>
+      <a id="finalize():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">finalize</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@finalize():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected[<a href="../java$lang.html" class="extype" name="java.lang">java.lang</a>] </dd><dt>Definition Classes</dt><dd>AnyRef</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="symbol">classOf[java.lang.Throwable]</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="scala.AnyRef#getClass" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="getClass():Class[_]"></a>
+      <a id="getClass():Class[_]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">getClass</span><span class="params">()</span><span class="result">: <span class="extype" name="java.lang.Class">Class</span>[_]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@getClass():Class[_]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="scala.AnyRef#hashCode" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="hashCode():Int"></a>
+      <a id="hashCode():Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">hashCode</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@hashCode():Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="curiodb.Node#inTransaction" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="inTransaction:Boolean"></a>
+      <a id="inTransaction:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">inTransaction</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@inTransaction:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Checks if the current Command is in a transaction.</p><div class="fullcomment"><div class="comment cmt"><p>Checks if the current Command is in a transaction.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="scala.Any#isInstanceOf" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="isInstanceOf[T0]:Boolean"></a>
+      <a id="isInstanceOf[T0]:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">isInstanceOf</span><span class="tparams">[<span name="T0">T0</span>]</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@isInstanceOf[T0]:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Any</dd></dl></div>
+    </li><li name="curiodb.Node#isolationLevel" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="isolationLevel:String"></a>
+      <a id="isolationLevel:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">isolationLevel</span><span class="result">: <span class="extype" name="java.lang.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@isolationLevel:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Transaction isolation level: &quot;repeatable&quot; reads, read &quot;committed&quot;,
+or read &quot;uncommitted&quot;.</p><div class="fullcomment"><div class="comment cmt"><p>Transaction isolation level: &quot;repeatable&quot; reads, read &quot;committed&quot;,
+or read &quot;uncommitted&quot;.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.PersistenceIdentity#journalPluginId" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="journalPluginId:String"></a>
+      <a id="journalPluginId:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">journalPluginId</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@journalPluginId:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>PersistenceIdentity</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#lastSequenceNr" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="lastSequenceNr:Long"></a>
+      <a id="lastSequenceNr:Long"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">lastSequenceNr</span><span class="result">: <span class="extype" name="scala.Long">Long</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@lastSequenceNr:Long" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#lastSnapshot" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="lastSnapshot:Option[akka.persistence.SnapshotMetadata]"></a>
+      <a id="lastSnapshot:Option[SnapshotMetadata]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">var</span>
+      </span>
+      <span class="symbol">
+        <span class="name">lastSnapshot</span><span class="result">: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="akka.persistence.SnapshotMetadata">SnapshotMetadata</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@lastSnapshot:Option[akka.persistence.SnapshotMetadata]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">The most recently saved snapshot.</p><div class="fullcomment"><div class="comment cmt"><p>The most recently saved snapshot. We store it on save and recover,
+so that we can delete it (and any earlier snapshots) each time we
+successfully save a new snapshot.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.Snapshotter#loadSnapshot" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="loadSnapshot(persistenceId:String,criteria:akka.persistence.SnapshotSelectionCriteria,toSequenceNr:Long):Unit"></a>
+      <a id="loadSnapshot(String,SnapshotSelectionCriteria,Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">loadSnapshot</span><span class="params">(<span name="persistenceId">persistenceId: <span class="extype" name="scala.Predef.String">String</span></span>, <span name="criteria">criteria: <span class="extype" name="akka.persistence.SnapshotSelectionCriteria">SnapshotSelectionCriteria</span></span>, <span name="toSequenceNr">toSequenceNr: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@loadSnapshot(persistenceId:String,criteria:akka.persistence.SnapshotSelectionCriteria,toSequenceNr:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Snapshotter</dd></dl></div>
+    </li><li name="akka.actor.ActorLogging#log" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="log:akka.event.LoggingAdapter"></a>
+      <a id="log:LoggingAdapter"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">log</span><span class="result">: <span class="extype" name="akka.event.LoggingAdapter">LoggingAdapter</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@log:akka.event.LoggingAdapter" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>ActorLogging</dd></dl></div>
+    </li><li name="scala.AnyRef#ne" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="ne(x$1:AnyRef):Boolean"></a>
+      <a id="ne(AnyRef):Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">ne</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.AnyRef">AnyRef</span></span>)</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@ne(x$1:AnyRef):Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd></dl></div>
+    </li><li name="scala.AnyRef#notify" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="notify():Unit"></a>
+      <a id="notify():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">notify</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@notify():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd></dl></div>
+    </li><li name="scala.AnyRef#notifyAll" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="notifyAll():Unit"></a>
+      <a id="notifyAll():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">notifyAll</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@notifyAll():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#numberToString" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="numberToString(n:Any):String"></a>
+      <a id="numberToString(Any):String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">numberToString</span><span class="params">(<span name="n">n: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@numberToString(n:Any):String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for dropping extraneous zeros from floats when converting to
+strings, for consistency with Redis' INCRBYFLOAT/HINCRBYFLOAT commands
+and sorted set scores.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for dropping extraneous zeros from floats when converting to
+strings, for consistency with Redis' INCRBYFLOAT/HINCRBYFLOAT commands
+and sorted set scores.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#onPersistFailure" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="onPersistFailure(cause:Throwable,event:Any,seqNr:Long):Unit"></a>
+      <a id="onPersistFailure(Throwable,Any,Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">onPersistFailure</span><span class="params">(<span name="cause">cause: <span class="extype" name="scala.Throwable">Throwable</span></span>, <span name="event">event: <span class="extype" name="scala.Any">Any</span></span>, <span name="seqNr">seqNr: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@onPersistFailure(cause:Throwable,event:Any,seqNr:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected </dd><dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#onPersistRejected" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="onPersistRejected(cause:Throwable,event:Any,seqNr:Long):Unit"></a>
+      <a id="onPersistRejected(Throwable,Any,Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">onPersistRejected</span><span class="params">(<span name="cause">cause: <span class="extype" name="scala.Throwable">Throwable</span></span>, <span name="event">event: <span class="extype" name="scala.Any">Any</span></span>, <span name="seqNr">seqNr: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@onPersistRejected(cause:Throwable,event:Any,seqNr:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected </dd><dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#onRecoveryFailure" visbl="prt" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="onRecoveryFailure(cause:Throwable,event:Option[Any]):Unit"></a>
+      <a id="onRecoveryFailure(Throwable,Option[Any]):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">onRecoveryFailure</span><span class="params">(<span name="cause">cause: <span class="extype" name="scala.Throwable">Throwable</span></span>, <span name="event">event: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="scala.Any">Any</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@onRecoveryFailure(cause:Throwable,event:Option[Any]):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Attributes</dt><dd>protected </dd><dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#pattern" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="pattern(values:Iterable[String],pattern:String):Iterable[String]"></a>
+      <a id="pattern(Iterable[String],String):Iterable[String]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">pattern</span><span class="params">(<span name="values">values: <span class="extype" name="scala.Iterable">Iterable</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>, <span name="pattern">pattern: <span class="extype" name="scala.Predef.String">String</span></span>)</span><span class="result">: <span class="extype" name="scala.Iterable">Iterable</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@pattern(values:Iterable[String],pattern:String):Iterable[String]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for glob-style filtering.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for glob-style filtering.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#persist" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persist[A](event:A)(handler:A=&gt;Unit):Unit"></a>
+      <a id="persist[A](A)((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persist</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="event">event: <span class="extype" name="akka.persistence.Eventsourced.persist.A">A</span></span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persist.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persist[A](event:A)(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#persistAfter" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistAfter:Int"></a>
+      <a id="persistAfter:Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persistAfter</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistAfter:Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Stores the duration which controls the minimum delay between
+receiving a command that writes, and persisting the actual value
+written.</p><div class="fullcomment"><div class="comment cmt"><p>Stores the duration which controls the minimum delay between
+receiving a command that writes, and persisting the actual value
+written.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#persistAll" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistAll[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit"></a>
+      <a id="persistAll[A](Seq[A])((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persistAll</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="events">events: <span class="extype" name="scala.collection.immutable.Seq">Seq</span>[<span class="extype" name="akka.persistence.Eventsourced.persistAll.A">A</span>]</span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persistAll.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistAll[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#persistAllAsync" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistAllAsync[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit"></a>
+      <a id="persistAllAsync[A](Seq[A])((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persistAllAsync</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="events">events: <span class="extype" name="scala.collection.immutable.Seq">Seq</span>[<span class="extype" name="akka.persistence.Eventsourced.persistAllAsync.A">A</span>]</span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persistAllAsync.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistAllAsync[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#persistAsync" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistAsync[A](event:A)(handler:A=&gt;Unit):Unit"></a>
+      <a id="persistAsync[A](A)((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persistAsync</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="event">event: <span class="extype" name="akka.persistence.Eventsourced.persistAsync.A">A</span></span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persistAsync.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistAsync[A](event:A)(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#persistenceId" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistenceId:String"></a>
+      <a id="persistenceId:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persistenceId</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistenceId:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a> → PersistenceIdentity</dd></dl></div>
+    </li><li name="curiodb.Node#persisting" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persisting:Boolean"></a>
+      <a id="persisting:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">var</span>
+      </span>
+      <span class="symbol">
+        <span class="name">persisting</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persisting:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Boolean representing whether we've scheduled an internal
+Persist message, so that it only occurs once at a time
+according to the duration configured by the curiodb.persist-after
+setting.</p><div class="fullcomment"><div class="comment cmt"><p>Boolean representing whether we've scheduled an internal
+Persist message, so that it only occurs once at a time
+according to the duration configured by the curiodb.persist-after
+setting.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.actor.Actor#postRestart" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="postRestart(reason:Throwable):Unit"></a>
+      <a id="postRestart(Throwable):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">postRestart</span><span class="params">(<span name="reason">reason: <span class="extype" name="scala.Throwable">Throwable</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@postRestart(reason:Throwable):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="symbol">classOf[java.lang.Exception]</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="akka.actor.UnrestrictedStash#postStop" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="postStop():Unit"></a>
+      <a id="postStop():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">postStop</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@postStop():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>UnrestrictedStash → Actor</dd></dl></div>
+    </li><li name="akka.actor.UnrestrictedStash#preRestart" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="preRestart(reason:Throwable,message:Option[Any]):Unit"></a>
+      <a id="preRestart(Throwable,Option[Any]):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">preRestart</span><span class="params">(<span name="reason">reason: <span class="extype" name="scala.Throwable">Throwable</span></span>, <span name="message">message: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="scala.Any">Any</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@preRestart(reason:Throwable,message:Option[Any]):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>UnrestrictedStash → Actor</dd></dl></div>
+    </li><li name="akka.actor.Actor#preStart" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="preStart():Unit"></a>
+      <a id="preStart():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">preStart</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@preStart():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="symbol">classOf[java.lang.Exception]</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#randomItem" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="randomItem(iterable:Iterable[String]):String"></a>
+      <a id="randomItem(Iterable[String]):String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">randomItem</span><span class="params">(<span name="iterable">iterable: <span class="extype" name="scala.Iterable">Iterable</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@randomItem(iterable:Iterable[String]):String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for selecting a random item.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for selecting a random item.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.Node#receive" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="receive:Node.this.Receive"></a>
+      <a id="receive:Receive"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">receive</span><span class="result">: <a href="#Receive=akka.actor.Actor.Receive" class="extmbr" name="curiodb.StringNode.Receive">Receive</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@receive:Node.this.Receive" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a> → PersistentActor → Actor</dd></dl></div>
+    </li><li name="curiodb.Node#receiveCommand" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="receiveCommand:Node.this.Receive"></a>
+      <a id="receiveCommand:Receive"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">receiveCommand</span><span class="result">: <a href="#Receive=akka.actor.Actor.Receive" class="extmbr" name="curiodb.StringNode.Receive">Receive</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@receiveCommand:Node.this.Receive" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Main Receive handler - deals with starting/stopping/persisting,
+and receiving Command instances, then running the Node actor's
+CommandRunner.</p><div class="fullcomment"><div class="comment cmt"><p>Main Receive handler - deals with starting/stopping/persisting,
+and receiving Command instances, then running the Node actor's
+CommandRunner.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a> → Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#receiveRecover" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="receiveRecover:Node.this.Receive"></a>
+      <a id="receiveRecover:Receive"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">receiveRecover</span><span class="result">: <a href="#Receive=akka.actor.Actor.Receive" class="extmbr" name="curiodb.StringNode.Receive">Receive</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@receiveRecover:Node.this.Receive" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Restore the Node actor's value on startup.</p><div class="fullcomment"><div class="comment cmt"><p>Restore the Node actor's value on startup.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a> → Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.PersistenceRecovery#recovery" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="recovery:akka.persistence.Recovery"></a>
+      <a id="recovery:Recovery"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">recovery</span><span class="result">: <span class="extype" name="akka.persistence.Recovery">Recovery</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@recovery:akka.persistence.Recovery" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>PersistenceRecovery</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#recoveryFinished" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="recoveryFinished:Boolean"></a>
+      <a id="recoveryFinished:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">recoveryFinished</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@recoveryFinished:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#recoveryRunning" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="recoveryRunning:Boolean"></a>
+      <a id="recoveryRunning:Boolean"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">recoveryRunning</span><span class="result">: <span class="extype" name="scala.Boolean">Boolean</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@recoveryRunning:Boolean" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd></dl></div>
+    </li><li name="curiodb.Node#rename" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="rename(fromValue:Any,toCommand:String):Unit"></a>
+      <a id="rename(Any,String):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">rename</span><span class="params">(<span name="fromValue">fromValue: <span class="extype" name="scala.Any">Any</span></span>, <span name="toCommand">toCommand: <span class="extype" name="scala.Predef.String">String</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@rename(fromValue:Any,toCommand:String):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Handles the RENAME/RENAMENX commands for all node types.</p><div class="fullcomment"><div class="comment cmt"><p>Handles the RENAME/RENAMENX commands for all node types. Each
+Node subclass is responsible for converting its value to something
+that can be used by the relevant command given - this command
+is typically implemented (and named) differently per node, and
+knows how to accept fromValue. Renaming is basically a delete,
+then create a new node, so we first delete ourselves (via the
+internal _DEL command), then pass the fromValue arg with the given
+command to what will be a newly created Node.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#respond" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="respond(response:Any):Unit"></a>
+      <a id="respond(Any):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">respond</span><span class="params">(<span name="response">response: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@respond(response:Any):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Sends a Response (usually the result of a command) back to
+the command's destination (usually a ClientNode sending a
+Command).</p><div class="fullcomment"><div class="comment cmt"><p>Sends a Response (usually the result of a command) back to
+the command's destination (usually a ClientNode sending a
+Command).
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#route" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="route(input:Seq[Any],client:Option[akka.actor.ActorRef]):Unit"></a>
+      <a id="route(Seq[Any],Option[ActorRef]):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">route</span><span class="params">(<span name="input">input: <span class="extype" name="scala.Seq">Seq</span>[<span class="extype" name="scala.Any">Any</span>]</span>, <span name="client">client: <span class="extype" name="scala.Option">Option</span>[<span class="extype" name="akka.actor.ActorRef">ActorRef</span>] = <span class="symbol">None</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@route(input:Seq[Any],client:Option[akka.actor.ActorRef]):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Shortcut route method for sending command input without a
+constructed Command instance, using the state of the
+current command (eg: db, clientID).</p><div class="fullcomment"><div class="comment cmt"><p>Shortcut route method for sending command input without a
+constructed Command instance, using the state of the
+current command (eg: db, clientID).
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#route" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="route(command:curiodb.Command):Unit"></a>
+      <a id="route(Command):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">route</span><span class="params">(<span name="command">command: <a href="Command.html" class="extype" name="curiodb.Command">Command</a></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@route(command:curiodb.Command):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Sends an unrouted Command to one or more KeyNode actors, either by
+routing by key, or broadcasting to all.</p><div class="fullcomment"><div class="comment cmt"><p>Sends an unrouted Command to one or more KeyNode actors, either by
+routing by key, or broadcasting to all.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="curiodb.StringNode#run" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="run:StringNode.this.CommandRunner"></a>
+      <a id="run:CommandRunner"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">run</span><span class="result">: <a href="#CommandRunner=PartialFunction[String,Any]" class="extmbr" name="curiodb.StringNode.CommandRunner">CommandRunner</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@run:StringNode.this.CommandRunner" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Abstract definition of each Node actor's CommandRunner that must
+be implemented.</p><div class="fullcomment"><div class="comment cmt"><p>Abstract definition of each Node actor's CommandRunner that must
+be implemented. It's the partial function that matches a Command
+name to the code that runs it.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="" class="extype" name="curiodb.StringNode">StringNode</a> → <a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.Node#runForAnyNode" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="runForAnyNode:Node.this.CommandRunner"></a>
+      <a id="runForAnyNode:CommandRunner"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">runForAnyNode</span><span class="result">: <a href="#CommandRunner=PartialFunction[String,Any]" class="extmbr" name="curiodb.StringNode.CommandRunner">CommandRunner</a></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@runForAnyNode:Node.this.CommandRunner" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Alternate Receive handler for all Node actors - these are internal
+commands can run for any Node type, and are not validated in any
+way, nor are they configured in commands.conf.</p><div class="fullcomment"><div class="comment cmt"><p>Alternate Receive handler for all Node actors - these are internal
+commands can run for any Node type, and are not validated in any
+way, nor are they configured in commands.conf. Currently used for
+transaction begin (_MULTI) and commit (_EXEC).</p><p>When _MULTI is received and a transaction is beginning, we store
+the current value in the transaction map against the transaction's
+client ID. Subsequent commands within the transaction will then
+read from and write to the transaction map, until it's committed
+via the _EXEC command, at which point we copy the value from the
+transaction map back to the main value, and remove it from the
+transaction map.</p><p>The transaction may also timeout which is scheduled when _MULTI is
+received. If this occurs and then _EXEC is received, we don't send
+acknowledgement back to the ClientNode, so it can then deal with
+its own timeout.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.Node#save" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="save():Unit"></a>
+      <a id="save():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">save</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@save():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">As discussed above, saves a snapshot.</p><div class="fullcomment"><div class="comment cmt"><p>As discussed above, saves a snapshot. If curiodb.persist-after is
+zero or less (which means every change must cause a snapshot to be
+saved), then just save a snapshot. Otherwise schedule the internal
+Persist message to save a snapshot, if none has already been
+scheduled, according to the value of the persisting var.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.Snapshotter#saveSnapshot" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="saveSnapshot(snapshot:Any):Unit"></a>
+      <a id="saveSnapshot(Any):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">saveSnapshot</span><span class="params">(<span name="snapshot">snapshot: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@saveSnapshot(snapshot:Any):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Snapshotter</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#scan" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="scan(values:Iterable[String]):Seq[String]"></a>
+      <a id="scan(Iterable[String]):Seq[String]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">scan</span><span class="params">(<span name="values">values: <span class="extype" name="scala.Iterable">Iterable</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Seq">Seq</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@scan(values:Iterable[String]):Seq[String]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for scan-style commands, namely SCAN/SSCAN/HSCAN/ZSCAN.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for scan-style commands, namely SCAN/SSCAN/HSCAN/ZSCAN.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.actor.Actor#self" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="self:akka.actor.ActorRef"></a>
+      <a id="self:ActorRef"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">implicit final </span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">self</span><span class="result">: <span class="extype" name="akka.actor.ActorRef">ActorRef</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@self:akka.actor.ActorRef" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd></dl></div>
+    </li><li name="akka.actor.Actor#sender" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="sender():akka.actor.ActorRef"></a>
+      <a id="sender():ActorRef"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">sender</span><span class="params">()</span><span class="result">: <span class="extype" name="akka.actor.ActorRef">ActorRef</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@sender():akka.actor.ActorRef" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#slice" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="slice[T](value:Seq[T]):Seq[T]"></a>
+      <a id="slice[T](Seq[T]):Seq[T]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">slice</span><span class="tparams">[<span name="T">T</span>]</span><span class="params">(<span name="value">value: <span class="extype" name="scala.Seq">Seq</span>[<span class="extype" name="curiodb.CommandProcessing.slice.T">T</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Seq">Seq</span>[<span class="extype" name="curiodb.CommandProcessing.slice.T">T</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@slice[T](value:Seq[T]):Seq[T]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Utility for slicing sequences, for commands such as SLICE,
+GETRANGE, LRANGE, etc.</p><div class="fullcomment"><div class="comment cmt"><p>Utility for slicing sequences, for commands such as SLICE,
+GETRANGE, LRANGE, etc.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.persistence.PersistenceIdentity#snapshotPluginId" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="snapshotPluginId:String"></a>
+      <a id="snapshotPluginId:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">snapshotPluginId</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@snapshotPluginId:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>PersistenceIdentity</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#snapshotSequenceNr" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="snapshotSequenceNr:Long"></a>
+      <a id="snapshotSequenceNr:Long"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">snapshotSequenceNr</span><span class="result">: <span class="extype" name="scala.Long">Long</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@snapshotSequenceNr:Long" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced → Snapshotter</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#snapshotterId" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="snapshotterId:String"></a>
+      <a id="snapshotterId:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">snapshotterId</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@snapshotterId:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced → Snapshotter</dd></dl></div>
+    </li><li name="curiodb.Node#sort" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="sort(values:Iterable[String]):Any"></a>
+      <a id="sort(Iterable[String]):Any"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">sort</span><span class="params">(<span name="values">values: <span class="extype" name="scala.Iterable">Iterable</span>[<span class="extype" name="scala.Predef.String">String</span>]</span>)</span><span class="result">: <span class="extype" name="scala.Any">Any</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@sort(values:Iterable[String]):Any" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Handles the SORT command.</p><div class="fullcomment"><div class="comment cmt"><p>Handles the SORT command. Defined here since it can be run against
+multiple Node types, namely ListNode, SetNode and SortedSetNode.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.actor.StashSupport#stash" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="stash():Unit"></a>
+      <a id="stash():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">stash</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@stash():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>StashSupport</dd></dl></div>
+    </li><li name="curiodb.CommandProcessing#stop" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="stop():Unit"></a>
+      <a id="stop():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">stop</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@stop():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Stops the actor - we define this shortcut to give subclassing traits
+the chance to override it and inject extra shutdown behavior that
+concrete actors need not know about.</p><div class="fullcomment"><div class="comment cmt"><p>Stops the actor - we define this shortcut to give subclassing traits
+the chance to override it and inject extra shutdown behavior that
+concrete actors need not know about. Note we wrap context.stop with
+Try here since it may be called twice due to transaction timeouts.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></dd></dl></div>
+    </li><li name="akka.actor.Actor#supervisorStrategy" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="supervisorStrategy:akka.actor.SupervisorStrategy"></a>
+      <a id="supervisorStrategy:SupervisorStrategy"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">supervisorStrategy</span><span class="result">: <span class="extype" name="akka.actor.SupervisorStrategy">SupervisorStrategy</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@supervisorStrategy:akka.actor.SupervisorStrategy" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Actor</dd></dl></div>
+    </li><li name="scala.AnyRef#synchronized" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="synchronized[T0](x$1:=&gt;T0):T0"></a>
+      <a id="synchronized[T0](⇒T0):T0"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">synchronized</span><span class="tparams">[<span name="T0">T0</span>]</span><span class="params">(<span name="arg0">arg0: ⇒ <span class="extype" name="java.lang.AnyRef.synchronized.T0">T0</span></span>)</span><span class="result">: <span class="extype" name="java.lang.AnyRef.synchronized.T0">T0</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@synchronized[T0](x$1:=&gt;T0):T0" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd></dl></div>
+    </li><li name="scala.AnyRef#toString" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="toString():String"></a>
+      <a id="toString():String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">toString</span><span class="params">()</span><span class="result">: <span class="extype" name="java.lang.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@toString():String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef → Any</dd></dl></div>
+    </li><li name="curiodb.Node#transactionTimeout" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="transactionTimeout:Int"></a>
+      <a id="transactionTimeout:Int"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">val</span>
+      </span>
+      <span class="symbol">
+        <span class="name">transactionTimeout</span><span class="result">: <span class="extype" name="scala.Int">Int</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@transactionTimeout:Int" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Stores the duration which controls the amount of time we allow
+a transaction to exist for.</p><div class="fullcomment"><div class="comment cmt"><p>Stores the duration which controls the amount of time we allow
+a transaction to exist for. This ensures that if for some reason
+the transaction does not complete, it can start handling write
+commands again.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#unhandled" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="unhandled(message:Any):Unit"></a>
+      <a id="unhandled(Any):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">unhandled</span><span class="params">(<span name="message">message: <span class="extype" name="scala.Any">Any</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@unhandled(message:Any):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced → Actor</dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#unstashAll" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="unstashAll():Unit"></a>
+      <a id="unstashAll():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">unstashAll</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@unstashAll():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced → StashSupport</dd></dl></div>
+    </li><li name="curiodb.Node#value" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="value:T"></a>
+      <a id="value:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">value</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@value:T" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Value getter according to the configured transaction isolation
+level:</p><div class="fullcomment"><div class="comment cmt"><p>Value getter according to the configured transaction isolation
+level:</p><p>- repeatable:  should always return the value of the current transaction
+- uncommitted: always returns the newest written value, even if uncommitted
+- committed:   always return the commit value, even inside a transaction</p><p>Note that there is no &quot;serializable&quot; level since there is no notion of
+a range query. You can read more info on isolation levels here:
+https://en.wikipedia.org/wiki/Isolation_(database_systems)
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.StringNode#valueOrZero" visbl="pub" data-isabs="false" fullComment="no" group="Ungrouped">
+      <a id="valueOrZero:String"></a>
+      <a id="valueOrZero:String"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">valueOrZero</span><span class="result">: <span class="extype" name="scala.Predef.String">String</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@valueOrZero:String" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Returns a default &quot;0&quot; string if the current value is an empty
+string, which mimics the behaviour of Redis for integer/float
+commands (INCR, DECR, etc) on string values.</p>
+    </li><li name="curiodb.Node#value_=" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="value_=(value:T):Unit"></a>
+      <a id="value_=(String):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span title="gt4s: value_$eq" class="name">value_=</span><span class="params">(<span name="value">value: <span class="extype" name="scala.Predef.String">String</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@value_=(value:T):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">Value setter - writes the current value, either to the main
+key, or a client ID if in a transaction.</p><div class="fullcomment"><div class="comment cmt"><p>Value setter - writes the current value, either to the main
+key, or a client ID if in a transaction.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="curiodb.Node#values" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="values:scala.collection.mutable.LinkedHashMap[String,T]"></a>
+      <a id="values:LinkedHashMap[String,String]"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">var</span>
+      </span>
+      <span class="symbol">
+        <span class="name">values</span><span class="result">: <span class="extype" name="scala.collection.mutable.LinkedHashMap">LinkedHashMap</span>[<span class="extype" name="scala.Predef.String">String</span>, <span class="extype" name="scala.Predef.String">String</span>]</span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@values:scala.collection.mutable.LinkedHashMap[String,T]" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <p class="shortcomment cmt">MVCC map of transaction values for the Node mapped to client IDs,
+including the committed &quot;main&quot; value, which is identified with
+an empty string as its key.</p><div class="fullcomment"><div class="comment cmt"><p>MVCC map of transaction values for the Node mapped to client IDs,
+including the committed &quot;main&quot; value, which is identified with
+an empty string as its key. LinkedHashMap is used so that we can
+access the most recently written value when transaction isolation
+is configued as read-uncommitted.
+</p></div><dl class="attributes block"> <dt>Definition Classes</dt><dd><a href="Node.html" class="extype" name="curiodb.Node">Node</a></dd></dl></div>
+    </li><li name="scala.AnyRef#wait" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="wait():Unit"></a>
+      <a id="wait():Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">wait</span><span class="params">()</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@wait():Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="defval" name="classOf[java.lang.InterruptedException]">...</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="scala.AnyRef#wait" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="wait(x$1:Long,x$2:Int):Unit"></a>
+      <a id="wait(Long,Int):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">wait</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.Long">Long</span></span>, <span name="arg1">arg1: <span class="extype" name="scala.Int">Int</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@wait(x$1:Long,x$2:Int):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="defval" name="classOf[java.lang.InterruptedException]">...</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li><li name="scala.AnyRef#wait" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="wait(x$1:Long):Unit"></a>
+      <a id="wait(Long):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier">final </span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name">wait</span><span class="params">(<span name="arg0">arg0: <span class="extype" name="scala.Long">Long</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@wait(x$1:Long):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>AnyRef</dd><dt>Annotations</dt><dd>
+                <span class="name">@throws</span><span class="args">(<span>
+      
+      <span class="defval" name="classOf[java.lang.InterruptedException]">...</span>
+    </span>)</span>
+              
+        </dd></dl></div>
+    </li></ol>
+            </div>
+
+        
+
+        <div id="values" class="values members">
+              <h3>Deprecated Value Members</h3>
+              <ol><li name="akka.persistence.Eventsourced#persist" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persist[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit"></a>
+      <a id="persist[A](Seq[A])((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name deprecated" title="Deprecated: (Since version 2.4) use persistAll instead">persist</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="events">events: <span class="extype" name="scala.collection.immutable.Seq">Seq</span>[<span class="extype" name="akka.persistence.Eventsourced.persist.A">A</span>]</span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persist.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persist[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd><dt>Annotations</dt><dd>
+                <span class="name">@deprecated</span>
+              
+        </dd><dt>Deprecated</dt><dd class="cmt"><p><i>(Since version 2.4)</i> use persistAll instead</p></dd></dl></div>
+    </li><li name="akka.persistence.Eventsourced#persistAsync" visbl="pub" data-isabs="false" fullComment="yes" group="Ungrouped">
+      <a id="persistAsync[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit"></a>
+      <a id="persistAsync[A](Seq[A])((A)⇒Unit):Unit"></a>
+      <h4 class="signature">
+      <span class="modifier_kind">
+        <span class="modifier"></span>
+        <span class="kind">def</span>
+      </span>
+      <span class="symbol">
+        <span class="name deprecated" title="Deprecated: (Since version 2.4) use persistAllAsync instead">persistAsync</span><span class="tparams">[<span name="A">A</span>]</span><span class="params">(<span name="events">events: <span class="extype" name="scala.collection.immutable.Seq">Seq</span>[<span class="extype" name="akka.persistence.Eventsourced.persistAsync.A">A</span>]</span>)</span><span class="params">(<span name="handler">handler: (<span class="extype" name="akka.persistence.Eventsourced.persistAsync.A">A</span>) ⇒ <span class="extype" name="scala.Unit">Unit</span></span>)</span><span class="result">: <span class="extype" name="scala.Unit">Unit</span></span>
+      </span>
+      </h4><span class="permalink">
+      <a href="../index.html#curiodb.StringNode@persistAsync[A](events:scala.collection.immutable.Seq[A])(handler:A=&gt;Unit):Unit" title="Permalink" target="_top">
+        <img src="../lib/permalink.png" alt="Permalink" />
+      </a>
+    </span>
+      <div class="fullcomment"><dl class="attributes block"> <dt>Definition Classes</dt><dd>Eventsourced</dd><dt>Annotations</dt><dd>
+                <span class="name">@deprecated</span>
+              
+        </dd><dt>Deprecated</dt><dd class="cmt"><p><i>(Since version 2.4)</i> use persistAllAsync instead</p></dd></dl></div>
+    </li></ol>
+            </div>
+        </div>
+
+        <div id="inheritedMembers">
+        <div class="parent" name="curiodb.Node">
+              <h3>Inherited from <a href="Node.html" class="extype" name="curiodb.Node">Node</a>[<span class="extype" name="scala.Predef.String">String</span>]</h3>
+            </div><div class="parent" name="akka.actor.ActorLogging">
+              <h3>Inherited from <span class="extype" name="akka.actor.ActorLogging">ActorLogging</span></h3>
+            </div><div class="parent" name="curiodb.CommandProcessing">
+              <h3>Inherited from <a href="CommandProcessing.html" class="extype" name="curiodb.CommandProcessing">CommandProcessing</a></h3>
+            </div><div class="parent" name="akka.persistence.PersistentActor">
+              <h3>Inherited from <span class="extype" name="akka.persistence.PersistentActor">PersistentActor</span></h3>
+            </div><div class="parent" name="akka.persistence.Eventsourced">
+              <h3>Inherited from <span class="extype" name="akka.persistence.Eventsourced">Eventsourced</span></h3>
+            </div><div class="parent" name="akka.persistence.PersistenceRecovery">
+              <h3>Inherited from <span class="extype" name="akka.persistence.PersistenceRecovery">PersistenceRecovery</span></h3>
+            </div><div class="parent" name="akka.persistence.PersistenceIdentity">
+              <h3>Inherited from <span class="extype" name="akka.persistence.PersistenceIdentity">PersistenceIdentity</span></h3>
+            </div><div class="parent" name="akka.actor.StashFactory">
+              <h3>Inherited from <span class="extype" name="akka.actor.StashFactory">StashFactory</span></h3>
+            </div><div class="parent" name="akka.actor.Stash">
+              <h3>Inherited from <span class="extype" name="akka.actor.Stash">Stash</span></h3>
+            </div><div class="parent" name="akka.dispatch.RequiresMessageQueue">
+              <h3>Inherited from <span class="extype" name="akka.dispatch.RequiresMessageQueue">RequiresMessageQueue</span>[<span class="extype" name="akka.dispatch.DequeBasedMessageQueueSemantics">DequeBasedMessageQueueSemantics</span>]</h3>
+            </div><div class="parent" name="akka.actor.UnrestrictedStash">
+              <h3>Inherited from <span class="extype" name="akka.actor.UnrestrictedStash">UnrestrictedStash</span></h3>
+            </div><div class="parent" name="akka.actor.StashSupport">
+              <h3>Inherited from <span class="extype" name="akka.actor.StashSupport">StashSupport</span></h3>
+            </div><div class="parent" name="akka.persistence.Snapshotter">
+              <h3>Inherited from <span class="extype" name="akka.persistence.Snapshotter">Snapshotter</span></h3>
+            </div><div class="parent" name="akka.actor.Actor">
+              <h3>Inherited from <span class="extype" name="akka.actor.Actor">Actor</span></h3>
+            </div><div class="parent" name="scala.AnyRef">
+              <h3>Inherited from <span class="extype" name="scala.AnyRef">AnyRef</span></h3>
+            </div><div class="parent" name="scala.Any">
+              <h3>Inherited from <span class="extype" name="scala.Any">Any</span></h3>
+            </div>
+        
+        </div>
+
+        <div id="groupedMembers">
+        <div class="group" name="Ungrouped">
+              <h3>Ungrouped</h3>
+              
+            </div>
+        </div>
+
+      </div>
+
+      <div id="tooltip"></div>
+
+      <div id="footer">  </div>
+
+
+    </body>
+      </html>
