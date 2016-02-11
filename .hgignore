@@ -1,7 +1,0 @@
-syntax: glob
-
-.DS_Store
-target/*
-application.conf
-.idea/*
-*.rdb
