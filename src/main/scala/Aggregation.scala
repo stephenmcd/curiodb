@@ -38,6 +38,7 @@ trait AggregateCommands extends CommandProcessing {
     case "DBSIZE"       => aggregate(Props[AggregateDBSize])
     case "DEL"          => aggregate(Props[AggregateDel])
     case "KEYS"         => aggregate(Props[AggregateKeys])
+    case "EXISTS"       => aggregate(Props[AggregateExists])
     case "FLUSHDB"      => aggregate(Props[AggregateFlushDB])
     case "FLUSHALL"     => aggregate(Props[AggregateFlushAll])
     case "PFCOUNT"      => aggregate(Props[AggregateHyperLogLogCount])
@@ -469,12 +470,16 @@ class AggregateDel extends BaseAggregateBool("_DEL") {
 
 }
 
+class AggregateExists extends BaseAggregateBool("__EXISTS") {
+  override def complete(): Int = trues.size
+}
+
 /**
  * Aggregate for the MSETNX command. We first query the KeyNode actors
  * for each key existing, and only send values to store in Node actors
  * if none of the keys exist, as per the MSETNX command's behavior.
  */
-class AggregateMSetNX extends BaseAggregateBool("EXISTS") {
+class AggregateMSetNX extends BaseAggregateBool("__EXISTS") {
 
   /**
    * Every odd arg is a key, and every even arg is a value.
