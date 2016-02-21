@@ -68,11 +68,11 @@ trait PubSubServer extends CommandProcessing {
    */
   def publish(): Int = {
     channels.get(command.key).map({subscribers =>
-      val message = Response(Seq("message", command.key, args(0)), "")
+      val message = Response(Seq("message", command.key, args(1)), "")
       subscribers.foreach(_ ! message)
       subscribers.size
     }).sum + patterns.filterKeys(!pattern(Seq(command.key), _).isEmpty).map({entry =>
-      val message = Response(Seq("pmessage", entry._1, command.key, args(0)), "")
+      val message = Response(Seq("pmessage", entry._1, command.key, args(1)), "")
       entry._2.foreach(_ ! message)
       entry._2.size
     }).sum
