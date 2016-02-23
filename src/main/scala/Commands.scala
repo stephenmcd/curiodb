@@ -291,11 +291,12 @@ trait CommandProcessing extends Actor {
   def respond(response: Any): Unit = {
     if (debug) {
       def path(x: ActorRef): String = x.path.toString.replace("akka://curiodb/user/", "")
+      val dest = command.client.map(path).getOrElse("None")
       println(Seq(
         "",
         s"ID:       ${command.id}",
         s"Node:     ${path(self)} (${getClass.getName.split('.').last})",
-        s"Dest:     ${path(command.client.get)}",
+        s"Dest:     ${dest}",
         s"Command:  $command",
         s"Response: $response",
         ""
