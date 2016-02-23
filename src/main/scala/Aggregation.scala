@@ -470,7 +470,13 @@ class AggregateDel extends BaseAggregateBool("_DEL") {
 
 }
 
-class AggregateExists extends BaseAggregateBool("__EXISTS") {
+/**
+ * Aggregate for the EXISTS command, which since Redis 3, supports
+ * multiple keys by whimsically returning the number of given keys
+ * that exist, rather than a sequence of 0/1 values representing
+ * the actual keys, as one might expect.
+ */
+class AggregateExists extends BaseAggregateBool("_EXISTS") {
   override def complete(): Int = trues.size
 }
 
@@ -479,7 +485,7 @@ class AggregateExists extends BaseAggregateBool("__EXISTS") {
  * for each key existing, and only send values to store in Node actors
  * if none of the keys exist, as per the MSETNX command's behavior.
  */
-class AggregateMSetNX extends BaseAggregateBool("__EXISTS") {
+class AggregateMSetNX extends BaseAggregateBool("_EXISTS") {
 
   /**
    * Every odd arg is a key, and every even arg is a value.

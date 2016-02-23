@@ -739,7 +739,7 @@ class KeyNode extends Node[mutable.Map[String, mutable.Map[String, NodeEntry]]] 
     case "_RANDOMKEY"    => randomItem(db().keys)
     case "_FLUSHDB"      => db().keys.map(key => delete(key)); SimpleReply()
     case "_FLUSHALL"     => value.foreach {case (dbName, entries) => entries.keys.map({key => delete(key, Some(dbName))})}; SimpleReply()
-    case "__EXISTS"      => args.map(exists)
+    case "_EXISTS"       => args.map(exists)
     case "TTL"           => val x = ttl; if (x == -1) x else x / 1000
     case "PTTL"          => ttl
     case "EXPIRE"        => expire(System.currentTimeMillis + (args(0).toInt * 1000))
