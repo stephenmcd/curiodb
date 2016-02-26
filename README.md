@@ -180,7 +180,8 @@ setting, to control how a key's value is read during a command:
   written version will be read, even if uncommitted.
 
 Note there is no `serializable` isolation level typically found in SQL
-databases, since neither Redis nor CurioDB have a notion range queries.
+databases, since neither Redis nor CurioDB have a notion of range
+queries.
 
 ## Configuration
 
