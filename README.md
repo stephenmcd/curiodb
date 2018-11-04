@@ -292,7 +292,7 @@ published messages over an extended period of time.
 In the case of errors such as invalid arguments to a command, WebSocket
 connections will transmit a JSON Object with a single `error` key
 containing the error message, while HTTP requests will return a
-response with a 400 status, contaning the error message in the response
+response with a 400 status, containing the error message in the response
 body.
 
 ## Disadvantages compared to Redis
